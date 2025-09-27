@@ -31,27 +31,23 @@
 //Todo: CANbus UART Configuration
 
 // RFM69 SPI Configuration
-#define RFM69_MOSI    0
-#define RFM69_MISO    1
-#define RFM69_SCK     10
-
-#define RFM69_SS      13
+// NOTE! pins may need to be changed
+#define RFM69_SCK     27
+#define RFM69_MISO    19
+#define RFM69_MOSI    5
+#define RFM69_CS      13 
 #define RFM69_IRQ     27
 #define RFM69_RST     15
-
-// NSS pin:   18
-// DIO0 pin:  26
-// NRST pin:  14
-// DIO1 pin:  33
+#define RFM69_GPIO    15
 
 // Logging TAG
 static const char *TAG = "ESP32-GPS-RFM69";
 
 // Create a new instance of the HAL class
-EspHal* hal = new EspHal(5, 19, 27);
+EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
 
 // Radio module instance
-RF69 radio = new Module(hal, 18, 26, 14, 33);
+RF69 radio = new Module(hal, RFM69_CS, RFM69_IRQ, RFM69_RST, RFM69_GPIO);
 
 // TinyGPS++ instance
 TinyGPSPlus gps;
@@ -65,14 +61,16 @@ void radio_hal_Init() {
     uint8_t sw[] = {0xAA, 0xD5};
     radio.setSyncWord(sw, sizeof(sw));
 
+    // initialize
+    ESP_LOGI(TAG, "[SX1276] Initializing ... ");
     int state = radio.begin();
     if (state != RADIOLIB_ERR_NONE) {
-    ESP_LOGI(TAG, "failed, code %d\n", state);
-    while(true) {
-      hal->delay(1000);
+        ESP_LOGI(TAG, "failed, code %d\n", state);
+        while(true) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
-  }
-  ESP_LOGI(TAG, "success!\n");
+    ESP_LOGI(TAG, "success!\n");
 }
 
 // Function to Initialize GPS UART
@@ -96,7 +94,6 @@ void aprs_init() {
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
 
-
 // Function to Initialize SPI for RFM69
 void spi_radio_bus_init() {
     spi_bus_config_t buscfg = {};  // Initialize to 0
@@ -110,7 +107,6 @@ void spi_radio_bus_init() {
 
     ESP_LOGI(TAG, "RFM69 SPI Initialized");
 }
-
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {
@@ -154,26 +150,15 @@ void gps_task(void *pvParameters) {
     }
 }
 
-
 // Radio task for testing transcievers
 void radio_test(void *pvParameters) {
-    // initialize
-    ESP_LOGI(TAG, "[SX1276] Initializing ... ");
-    int state = radio.begin();
-    if (state != RADIOLIB_ERR_NONE) {
-        ESP_LOGI(TAG, "failed, code %d\n", state);
-        while(true) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-    }
-    ESP_LOGI(TAG, "success!\n");
 
     while(1) {
         uint8_t testBuff[8] = {0x07, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
         ESP_LOGI(TAG, "[RFM69] Transmitting packet ... ");
         //state = radio.transmit("Hello World!");
         //transmit(const uint8_t* data, size_t len, uint8_t addr)
-        state = radio.transmit(testBuff, 8);
+        int state = radio.transmit(testBuff, 8);
         if (state == RADIOLIB_ERR_NONE) {
             // the packet was successfully transmitted
             ESP_LOGI(TAG, "success!");
@@ -184,7 +169,6 @@ void radio_test(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }  
 }
-
 
 void chipIdEcho() {
     printf("Starting Chip Identification");

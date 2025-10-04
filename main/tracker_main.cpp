@@ -23,12 +23,10 @@
 #include "aprs.h"
 
 // GPS UART Configuration
-#define GPS_UART_NUM   UART_NUM_0
-#define GPS_TX_PIN     21  // TX not needed (GPS is sending data)
-#define GPS_RX_PIN     20  // ESP32 RX (Connect to GPS TX)
+#define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
+#define GPS_TX_PIN     17  // TX not needed (GPS is sending data)
+#define GPS_RX_PIN     18  // ESP32 RX (Connect to GPS TX)
 #define BUF_SIZE       1024
-
-//Todo: CANbus UART Configuration
 
 // RFM69 SPI Configuration
 // NOTE! pins may need to be changed
@@ -39,6 +37,9 @@
 #define RFM69_IRQ     27
 #define RFM69_RST     15
 #define RFM69_GPIO    15
+
+// TODO: CANbus UART Configuration
+// TODO: Wifi setup
 
 // Logging TAG
 static const char *TAG = "ESP32-GPS-RFM69";
@@ -75,8 +76,9 @@ void radio_hal_Init() {
 
 // Function to Initialize GPS UART
 void gps_uart_init() {
+    ESP_LOGI(TAG, "Entered GPS function");
     uart_config_t uart_config = {};
-    uart_config.baud_rate = 38400;
+    uart_config.baud_rate = 9600;  // NEO-6M default
     uart_config.data_bits = UART_DATA_8_BITS;
     uart_config.parity = UART_PARITY_DISABLE;
     uart_config.stop_bits = UART_STOP_BITS_1;
@@ -85,6 +87,7 @@ void gps_uart_init() {
     uart_driver_install(GPS_UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
     uart_param_config(GPS_UART_NUM, &uart_config);
     uart_set_pin(GPS_UART_NUM, GPS_TX_PIN, GPS_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_LOGI(TAG, "GPS UART initialized at %d baud on UART%d", uart_config.baud_rate, GPS_UART_NUM);
 }
 
 
@@ -110,23 +113,32 @@ void spi_radio_bus_init() {
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Entering GPS task");
     uint8_t data[BUF_SIZE];
+    
     while (true) {
-        int len = uart_read_bytes(GPS_UART_NUM, data, BUF_SIZE, 100 / portTICK_PERIOD_MS);
+        int len = uart_read_bytes(GPS_UART_NUM, data, BUF_SIZE, 1000 / portTICK_PERIOD_MS);
+        
         if (len > 0) {
+            printf("\n=== GPS Data (Length: %d) ===\n", len);   
             for (int i = 0; i < len; i++) {
-                gps.encode(data[i]);
+                gps.encode(data[i]); //Feed NMEA data to tinyGPS++
             }
+            // printf("GPS Parser Stats: Chars=%lu, Sentences=%lu, Failed=%lu\n", 
+            //        gps.charsProcessed(), gps.sentencesWithFix(), gps.failedChecksum());
+        } else {
+            printf("No GPS data received in last second\n");
         }
 
-        // If new GPS location is available
+        // Check if we have a valid location
         if (gps.location.isUpdated()) {
             char gps_buffer[64] = {};
 
-            // Debug string
-            snprintf(gps_buffer, sizeof(gps_buffer), "Lat: %.6f, Lon: %.6f",
-                     gps.location.lat(), gps.location.lng());
-            ESP_LOGI(TAG, "GPS: %s", gps_buffer);
+            snprintf(gps_buffer, sizeof(gps_buffer), 
+                     "Lat=%.6f, Lon=%.6f, Time=%d:%d:%d, Sats=%ld", 
+                     gps.location.lat(), gps.location.lng(), 
+                     gps.time.hour(), gps.time.minute(), gps.time.second(), gps.satellites.value());
+            ESP_LOGI(TAG, "%s", gps_buffer);
 
             // Radio string
             packet.payload = snprintf(gps_buffer, sizeof(gps_buffer),
@@ -135,7 +147,7 @@ void gps_task(void *pvParameters) {
 
             std::vector<uint8_t> APRSencoded = packet.encode();
 
-            radio.transmit((uint8_t*)APRSencoded.data(), APRSencoded.size());
+            //radio.transmit((uint8_t*)APRSencoded.data(), APRSencoded.size());
 
             /*
              * Without FIFO stitching or interrupt based packet management (ISR/DMA) there
@@ -145,8 +157,7 @@ void gps_task(void *pvParameters) {
             if (APRSencoded.size() >= 64)
                 ESP_LOGI(TAG, "Radio FIFO error, check main file for comments");
         }
-
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for stability
+        vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay
     }
 }
 
@@ -171,12 +182,17 @@ void radio_test(void *pvParameters) {
 }
 
 void chipIdEcho() {
-    printf("Starting Chip Identification");
+    printf("\n=== Starting Chip Identification ===\n");
+    fflush(stdout);
+    
+    // Add small delay to ensure output is flushed
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     /* Print chip information */
     esp_chip_info_t chip_info;
     uint32_t flash_size;
     esp_chip_info(&chip_info);
+    
     printf("This is %s chip with %d CPU core(s), %s%s%s%s, ",
            CONFIG_IDF_TARGET,
            chip_info.cores,
@@ -184,30 +200,46 @@ void chipIdEcho() {
            (chip_info.features & CHIP_FEATURE_BT) ? "BT" : "",
            (chip_info.features & CHIP_FEATURE_BLE) ? "BLE" : "",
            (chip_info.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
+    fflush(stdout);
 
     unsigned major_rev = chip_info.revision / 100;
     unsigned minor_rev = chip_info.revision % 100;
     printf("silicon revision v%d.%d, ", major_rev, minor_rev);
+    fflush(stdout);
+    
     if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
-        printf("Get flash size failed");
+        printf("Get flash size failed\n");
+        fflush(stdout);
         return;
     }
 
     printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
+    fflush(stdout);
 
-    printf("Minimum free heap size: %" PRIu32 " bytes\n\n", esp_get_minimum_free_heap_size());
+    printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
+    printf("=== Chip Identification Complete ===\n\n");
+    fflush(stdout);
 }
 
 extern "C" void app_main(void)
 {
-    printf("hello world");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // Set log level to verbose for debugging
+    esp_log_level_set("*", ESP_LOG_VERBOSE);
+    
+    printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
     fflush(stdout);
+    
+    //chipIdEcho();
 
     gps_uart_init();
     spi_radio_bus_init();
-    radio_hal_Init(); // RFM69 connection
+    //radio_hal_Init(); // RFM69 connection
 
-    xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
+    //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);
+    
+    ESP_LOGI(TAG, "App main completed, tasks started");
 }

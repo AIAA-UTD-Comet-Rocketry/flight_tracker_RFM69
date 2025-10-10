@@ -16,6 +16,7 @@
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_system.h"
+#include "esp_wifi.h"
 
 #include <RadioLib.h>
 #include "TinyGPS++.h"
@@ -30,17 +31,22 @@
 
 // RFM69 SPI Configuration
 // NOTE! pins may need to be changed
-#define RFM69_SCK     27
-#define RFM69_MISO    19
-#define RFM69_MOSI    5
-#define RFM69_CS      13 
-#define RFM69_IRQ     27
-#define RFM69_RST     15
-#define RFM69_GPIO    15
+#define RFM69_SCK     12
+#define RFM69_MISO    13
+#define RFM69_MOSI    11
+#define RFM69_CS      10 
+#define RFM69_IRQ     46 // G0 Pin in Breakout board
+#define RFM69_RST     9
+#define RFM69_GPIO    15 // Not currently used
 
 // TODO: CANbus UART Configuration
 // TODO: Wifi setup
 
+// wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+// ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+// esp_wifi_set_mode(WIFI_MODE_STA);
+// esp_wifi_start();
+    
 // Logging TAG
 static const char *TAG = "ESP32-GPS-RFM69";
 
@@ -124,8 +130,8 @@ void gps_task(void *pvParameters) {
             for (int i = 0; i < len; i++) {
                 gps.encode(data[i]); //Feed NMEA data to tinyGPS++
             }
-            // printf("GPS Parser Stats: Chars=%lu, Sentences=%lu, Failed=%lu\n", 
-            //        gps.charsProcessed(), gps.sentencesWithFix(), gps.failedChecksum());
+            printf("GPS Parser Stats: Chars=%lu, Sentences=%lu, Failed=%lu\n", 
+                   gps.charsProcessed(), gps.sentencesWithFix(), gps.failedChecksum());
         } else {
             printf("No GPS data received in last second\n");
         }
@@ -147,7 +153,7 @@ void gps_task(void *pvParameters) {
 
             std::vector<uint8_t> APRSencoded = packet.encode();
 
-            //radio.transmit((uint8_t*)APRSencoded.data(), APRSencoded.size());
+            radio.transmit((uint8_t*)APRSencoded.data(), APRSencoded.size());
 
             /*
              * Without FIFO stitching or interrupt based packet management (ISR/DMA) there

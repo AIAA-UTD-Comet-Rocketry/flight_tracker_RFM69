@@ -21,6 +21,7 @@
 #include "TinyGPS++.h"
 #include "radiolib_esp32s3_hal.hpp" // include the hardware abstraction layer
 #include "aprs.h"
+#include "math.h"
 
 // GPS UART Configuration
 #define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
@@ -30,13 +31,13 @@
 
 // RFM69 SPI Configuration
 // NOTE! pins may need to be changed
-#define RFM69_SCK     27
-#define RFM69_MISO    19
-#define RFM69_MOSI    5
-#define RFM69_CS      13 
+#define RFM69_SCK     12
+#define RFM69_MISO    13
+#define RFM69_MOSI    11
+#define RFM69_CS      10 
 #define RFM69_IRQ     27
 #define RFM69_RST     15
-#define RFM69_GPIO    15
+//#define RFM69_GPIO    14          //not sure if needed
 
 // TODO: CANbus UART Configuration
 // TODO: Wifi setup
@@ -48,7 +49,7 @@ static const char *TAG = "ESP32-GPS-RFM69";
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
 
 // Radio module instance
-RF69 radio = new Module(hal, RFM69_CS, RFM69_IRQ, RFM69_RST, RFM69_GPIO);
+RF69 radio = RF69(new Module(hal, RFM69_CS, RFM69_IRQ, RFM69_RST));
 
 // TinyGPS++ instance
 TinyGPSPlus gps;
@@ -56,22 +57,45 @@ TinyGPSPlus gps;
 // APRS codec instance
 APRSPacket packet;
 
-void radio_hal_Init() {
-    radio.setFrequency(433.4);
-    radio.setBitRate(1.55);
-    uint8_t sw[] = {0xAA, 0xD5};
+// void radio_hal_Init() {
+//     radio.setFrequency(433.4);
+//     radio.setBitRate(1.55);
+//     uint8_t sw[] = {0xAA, 0xD5};
+//     radio.setSyncWord(sw, sizeof(sw));
+
+//     // initialize
+//     ESP_LOGI(TAG, "[SX1276] Initializing ... ");
+//     int state = radio.begin();
+//     if (state != RADIOLIB_ERR_NONE) {
+//         ESP_LOGI(TAG, "failed, code %d\n", state);
+//         while(true) {
+//             vTaskDelay(pdMS_TO_TICKS(1000));
+//         }
+//     }
+//     ESP_LOGI(TAG, "success!\n");
+// }
+
+static bool radio_init() {
+    ESP_LOGI(TAG, "[RFM69] Initializing...");
+    int st = radio.begin();
+    if (st != RADIOLIB_ERR_NONE) {
+        ESP_LOGE(TAG, "radio.begin() failed: %d", st);
+        return false;
+    }
+
+    // Start with conservative/forgiving link params; align to your ground RX later
+    radio.setFrequency(433.920);          // MHz
+    radio.setBitRate(4800.0);             // bps
+    radio.setFrequencyDeviation(50.0);    // kHz
+    radio.setRxBandwidth(125.0);          // kHz
+    radio.setOOK(false);                  // ensure FSK
+    radio.setOutputPower(13);             // dBm (mind regs/antenna)
+
+    uint8_t sw[] = {0x2D, 0xD4};          // sync word — must match receiver
     radio.setSyncWord(sw, sizeof(sw));
 
-    // initialize
-    ESP_LOGI(TAG, "[SX1276] Initializing ... ");
-    int state = radio.begin();
-    if (state != RADIOLIB_ERR_NONE) {
-        ESP_LOGI(TAG, "failed, code %d\n", state);
-        while(true) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-    }
-    ESP_LOGI(TAG, "success!\n");
+    ESP_LOGI(TAG, "RFM69 ready");
+    return true;
 }
 
 // Function to Initialize GPS UART
@@ -97,19 +121,19 @@ void aprs_init() {
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
 
-// Function to Initialize SPI for RFM69
-void spi_radio_bus_init() {
-    spi_bus_config_t buscfg = {};  // Initialize to 0
-    buscfg.mosi_io_num = RFM69_MOSI;
-    buscfg.miso_io_num = RFM69_MISO;
-    buscfg.sclk_io_num = RFM69_SCK;
-    buscfg.quadwp_io_num = -1;
-    buscfg.quadhd_io_num = -1;
+// // Function to Initialize SPI for RFM69
+// void spi_radio_bus_init() {
+//     spi_bus_config_t buscfg = {};  // Initialize to 0
+//     buscfg.mosi_io_num = RFM69_MOSI;
+//     buscfg.miso_io_num = RFM69_MISO;
+//     buscfg.sclk_io_num = RFM69_SCK;
+//     buscfg.quadwp_io_num = -1;
+//     buscfg.quadhd_io_num = -1;
 
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+//     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    ESP_LOGI(TAG, "RFM69 SPI Initialized");
-}
+//     ESP_LOGI(TAG, "RFM69 SPI Initialized");
+// }
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {
@@ -131,31 +155,56 @@ void gps_task(void *pvParameters) {
         }
 
         // Check if we have a valid location
+        // if (gps.location.isUpdated()) {
+        //     char gps_buffer[64] = {};
+
+        //     snprintf(gps_buffer, sizeof(gps_buffer), 
+        //              "Lat=%.6f, Lon=%.6f, Time=%d:%d:%d, Sats=%ld", 
+        //              gps.location.lat(), gps.location.lng(), 
+        //              gps.time.hour(), gps.time.minute(), gps.time.second(), gps.satellites.value());
+        //     ESP_LOGI(TAG, "%s", gps_buffer);
+
+        //     // Radio string
+        //     packet.payload = snprintf(gps_buffer, sizeof(gps_buffer),
+        //                               "=%.2fN/%.2fW-Team 317", 
+        //                               gps.location.lat(), gps.location.lng());
+
+        //     std::vector<uint8_t> APRSencoded = packet.encode();
+
+        //     //radio.transmit((uint8_t*)APRSencoded.data(), APRSencoded.size());
+
+        //     /*
+        //      * Without FIFO stitching or interrupt based packet management (ISR/DMA) there
+        //      * is a limit to RFM69 radio frames containing data payloads less than 64 bytes.
+        //      * Reduce comment field lengths or split transmission into multiple packets.
+        //      */
+        //     if (APRSencoded.size() >= 64)
+        //         ESP_LOGI(TAG, "Radio FIFO error, check main file for comments");
+        // }
         if (gps.location.isUpdated()) {
             char gps_buffer[64] = {};
-
-            snprintf(gps_buffer, sizeof(gps_buffer), 
-                     "Lat=%.6f, Lon=%.6f, Time=%d:%d:%d, Sats=%ld", 
-                     gps.location.lat(), gps.location.lng(), 
-                     gps.time.hour(), gps.time.minute(), gps.time.second(), gps.satellites.value());
+            snprintf(gps_buffer, sizeof(gps_buffer),
+                    "Lat=%.6f, Lon=%.6f, Time=%02d:%02d:%02d, Sats=%ld",
+                    gps.location.lat(), gps.location.lng(),
+                    gps.time.hour(), gps.time.minute(), gps.time.second(),
+                    gps.satellites.value());
             ESP_LOGI(TAG, "%s", gps_buffer);
 
-            // Radio string
-            packet.payload = snprintf(gps_buffer, sizeof(gps_buffer),
-                                      "=%.2fN/%.2fW-Team 317", 
-                                      gps.location.lat(), gps.location.lng());
+            // Build compact APRS text (example; keep short!)
+            char aprs_text[48] = {};
+            snprintf(aprs_text, sizeof(aprs_text),
+                    "=%.5fN/%.5fW Team317",
+                    fabs(gps.location.lat()), fabs(gps.location.lng()));
 
-            std::vector<uint8_t> APRSencoded = packet.encode();
+            packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
+            std::vector<uint8_t> frame = packet.encode();
 
-            //radio.transmit((uint8_t*)APRSencoded.data(), APRSencoded.size());
-
-            /*
-             * Without FIFO stitching or interrupt based packet management (ISR/DMA) there
-             * is a limit to RFM69 radio frames containing data payloads less than 64 bytes.
-             * Reduce comment field lengths or split transmission into multiple packets.
-             */
-            if (APRSencoded.size() >= 64)
-                ESP_LOGI(TAG, "Radio FIFO error, check main file for comments");
+            if (frame.size() < 64) {
+                // int st = radio.transmit(frame.data(), frame.size());  // enable once ready
+                // ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)frame.size());
+            } else {
+                ESP_LOGW(TAG, "APRS frame %uB exceeds RFM69 FIFO", (unsigned)frame.size());
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay
     }
@@ -226,8 +275,9 @@ extern "C" void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(1000));
     
-    // Set log level to verbose for debugging
-    esp_log_level_set("*", ESP_LOG_VERBOSE);
+    // Set log level to verbose for debugging (changed to info for less jitter)
+    //esp_log_level_set("*", ESP_LOG_VERBOSE);
+    esp_log_level_set("*", ESP_LOG_INFO);
     
     printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
     fflush(stdout);
@@ -235,8 +285,12 @@ extern "C" void app_main(void)
     //chipIdEcho();
 
     gps_uart_init();
-    spi_radio_bus_init();
+
+    //spi_radio_bus_init();
     //radio_hal_Init(); // RFM69 connection
+    if (!radio_init()) {
+        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 
     //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);

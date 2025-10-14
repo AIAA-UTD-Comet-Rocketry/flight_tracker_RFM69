@@ -30,14 +30,14 @@
 #define BUF_SIZE       1024
 
 // RFM69 SPI Configuration
-// NOTE! pins may need to be changed
-#define RFM69_SCK     12
-#define RFM69_MISO    13
-#define RFM69_MOSI    11
-#define RFM69_CS      10 
-#define RFM69_IRQ     27
-#define RFM69_RST     15
-//#define RFM69_GPIO    14          //not sure if needed
+#define RFM69_SCK     12    // SPI2 SCK
+#define RFM69_MISO    13    // SPI2 MISO
+#define RFM69_MOSI    11    // SPI2 MOSI
+#define RFM69_CS      10    // NSS/CS (manual GPIO)
+#define RFM69_IRQ     27    // DIO0 -> regular input GPIO (NOT a strapping pin)
+#define RFM69_RST     15    // Reset line (regular output GPIO)
+// #define RFM69_GPIO  15    // (remove/unused) conflicts with RST if kept
+
 
 // TODO: CANbus UART Configuration
 // TODO: Wifi setup
@@ -122,18 +122,30 @@ void aprs_init() {
 }
 
 // // Function to Initialize SPI for RFM69
-// void spi_radio_bus_init() {
-//     spi_bus_config_t buscfg = {};  // Initialize to 0
-//     buscfg.mosi_io_num = RFM69_MOSI;
-//     buscfg.miso_io_num = RFM69_MISO;
-//     buscfg.sclk_io_num = RFM69_SCK;
-//     buscfg.quadwp_io_num = -1;
-//     buscfg.quadhd_io_num = -1;
+// #include "driver/gpio.h"
+void spi_radio_bus_init() {
+  spi_bus_config_t b = {};
+  b.mosi_io_num = RFM69_MOSI; 
+  b.miso_io_num = RFM69_MISO; 
+  b.sclk_io_num = RFM69_SCK;
+  b.quadwp_io_num = -1; 
+  b.quadhd_io_num = -1;
+  b.max_transfer_sz = 4096;
+    
+  esp_err_t e = spi_bus_initialize(SPI2_HOST, &b, SPI_DMA_CH_AUTO);
+  if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) ESP_ERROR_CHECK(e);
+  gpio_config_t cs = { .pin_bit_mask = 1ULL<<RFM69_CS, .mode=GPIO_MODE_OUTPUT };
+  ESP_ERROR_CHECK(gpio_config(&cs)); gpio_set_level(RFM69_CS, 1);
+  gpio_config_t irq = { .pin_bit_mask = 1ULL<<RFM69_IRQ, .mode=GPIO_MODE_INPUT };
+  ESP_ERROR_CHECK(gpio_config(&irq));
+  gpio_config_t rst = { .pin_bit_mask = 1ULL<<RFM69_RST, .mode=GPIO_MODE_OUTPUT };
+  ESP_ERROR_CHECK(gpio_config(&rst));
 
-//     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+  gpio_set_level(RFM69_RST, 0); vTaskDelay(pdMS_TO_TICKS(1));
+  gpio_set_level(RFM69_RST, 1); delay_us(200);
+  gpio_set_level(RFM69_RST, 0); vTaskDelay(pdMS_TO_TICKS(5));
+}
 
-//     ESP_LOGI(TAG, "RFM69 SPI Initialized");
-// }
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {

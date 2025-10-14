@@ -11,15 +11,17 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "driver/spi_master.h"
+#include "driver/gpio.h"         // for gpio_config/gpio_set_level
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_system.h"
+#include "esp_idf_version.h"     // for ESP_IDF_VERSION_* macros
 
 #include <RadioLib.h>
 #include "TinyGPS++.h"
-#include "radiolib_esp32s3_hal.hpp" // include the hardware abstraction layer
+#include "radiolib_esp32s3_hal.hpp" // hardware abstraction layer
 #include "aprs.h"
 #include "math.h"
 
@@ -101,6 +103,7 @@ static bool radio_init() {
 // Function to Initialize GPS UART
 void gps_uart_init() {
     ESP_LOGI(TAG, "Entered GPS function");
+    
     uart_config_t uart_config = {};
     uart_config.baud_rate = 9600;  // NEO-6M default
     uart_config.data_bits = UART_DATA_8_BITS;
@@ -121,19 +124,91 @@ void aprs_init() {
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
 
-// // Function to Initialize SPI for RFM69
-// void spi_radio_bus_init() {
-//     spi_bus_config_t buscfg = {};  // Initialize to 0
-//     buscfg.mosi_io_num = RFM69_MOSI;
-//     buscfg.miso_io_num = RFM69_MISO;
-//     buscfg.sclk_io_num = RFM69_SCK;
-//     buscfg.quadwp_io_num = -1;
-//     buscfg.quadhd_io_num = -1;
+// Function to Initialize SPI for RFM69
+// Function to Initialize SPI bus and related GPIO for the RFM69 (ESP-IDF)
 
-//     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+void spi_radio_bus_init() {
+    ESP_LOGI(TAG, "Initializing SPI bus for RFM69...");
 
-//     ESP_LOGI(TAG, "RFM69 SPI Initialized");
-// }
+    // SPI bus config (no device added here; RadioLib/EspHal drives CS manually)
+    spi_bus_config_t buscfg = {};
+    buscfg.mosi_io_num   = RFM69_MOSI;
+    buscfg.miso_io_num   = RFM69_MISO;
+    buscfg.sclk_io_num   = RFM69_SCK;
+    buscfg.quadwp_io_num = -1;
+    buscfg.quadhd_io_num = -1;
+    buscfg.max_transfer_sz = 4096;   // due to RMF's small size
+
+    esp_err_t err = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "SPI2_HOST already initialized; continuing");
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_bus_initialize failed: %d", (int)err);
+        ESP_ERROR_CHECK(err);
+    } else {
+        ESP_LOGI(TAG, "SPI2_HOST bus initialized");
+    }
+
+    // CS pin (handled by RadioLib) 
+    
+    gpio_config_t io_cs = {};
+    io_cs.pin_bit_mask  = 1ULL << RFM69_CS;
+    io_cs.mode          = GPIO_MODE_OUTPUT;
+    io_cs.pull_up_en    = GPIO_PULLUP_DISABLE;
+    io_cs.pull_down_en  = GPIO_PULLDOWN_DISABLE;
+    io_cs.intr_type     = GPIO_INTR_DISABLE;
+    err = gpio_config(&io_cs);
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "CS gpio_config(): already configured");
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
+    // Idle high so device stays deselected outside transfers
+    
+    gpio_set_level(RFM69_CS, 1);
+
+    // IRQ/DIO0 pin (RFM69 DIO0) 
+    
+    gpio_config_t io_irq = {};
+    io_irq.pin_bit_mask  = 1ULL << RFM69_IRQ;
+    io_irq.mode          = GPIO_MODE_INPUT;
+    io_irq.pull_up_en    = GPIO_PULLUP_DISABLE;   // RFM69 DIO is push-pull
+    io_irq.pull_down_en  = GPIO_PULLDOWN_DISABLE;
+    io_irq.intr_type     = GPIO_INTR_DISABLE;     // RadioLib may attach ISR later
+    err = gpio_config(&io_irq);
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "IRQ gpio_config(): already configured");
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
+
+    // RST pins
+    
+    gpio_config_t io_rst = {};
+    io_rst.pin_bit_mask  = 1ULL << RFM69_RST;
+    io_rst.mode          = GPIO_MODE_OUTPUT;
+    io_rst.pull_up_en    = GPIO_PULLUP_DISABLE;
+    io_rst.pull_down_en  = GPIO_PULLDOWN_DISABLE;
+    io_rst.intr_type     = GPIO_INTR_DISABLE;
+    err = gpio_config(&io_rst);
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "RST gpio_config(): already configured");
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
+
+    // Datasheet: drive RESET high >100 µs, then low; wait ~5 ms
+    
+    gpio_set_level(RFM69_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(1));
+    gpio_set_level(RFM69_RST, 1);
+    ets_delay_us(200);                 // 200 µs high (precise short delay)
+    gpio_set_level(RFM69_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    ESP_LOGI(TAG, "RFM69 SPI Initialized");
+}
+
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {

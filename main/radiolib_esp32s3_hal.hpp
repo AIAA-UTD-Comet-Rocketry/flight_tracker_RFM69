@@ -188,6 +188,7 @@ class EspHal : public RadioLibHal {
     // Attach the device to the SPI bus
     ESP_ERROR_CHECK(spi_bus_add_device(this->host, &spi_dev, &spi));
     spi_initialized = true;
+    ESP_LOGI(LOG_TAG, "SPI bus initialized");
   }
 
   void spiBeginTransaction() {}

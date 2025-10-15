@@ -13,12 +13,16 @@ int16_t RF69::begin(float freq, float br, float freqDev, float rxBw, int8_t pwr,
   this->mod->init();
   this->mod->hal->pinMode(this->mod->getIrq(), this->mod->hal->GpioModeInput);
 
+  RADIOLIB_DEBUG_BASIC_PRINTLN("69 one");
+
   // try to find the RF69 chip
   uint8_t i = 0;
   bool flagFound = false;
   while((i < 10) && !flagFound) {
     // reset the module
     reset();
+
+    RADIOLIB_DEBUG_BASIC_PRINTLN("69 two");
 
     // check version register
     int16_t version = getChipVersion();
@@ -30,6 +34,8 @@ int16_t RF69::begin(float freq, float br, float freqDev, float rxBw, int8_t pwr,
       i++;
     }
   }
+
+  RADIOLIB_DEBUG_BASIC_PRINTLN("69 three");
 
   if(!flagFound) {
     RADIOLIB_DEBUG_BASIC_PRINTLN("No RF69 found!");

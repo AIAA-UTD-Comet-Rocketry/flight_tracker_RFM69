@@ -17,12 +17,15 @@
 #include "esp_flash.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
+#include "math.h"
+#include "esp_twai.h"
+#include "esp_twai_onchip.h"
 
 #include <RadioLib.h>
 #include "TinyGPS++.h"
 #include "radiolib_esp32s3_hal.hpp" // include the hardware abstraction layer
 #include "aprs.h"
-#include "math.h"
+#include "global_config.h"
 
 // GPS UART Configuration
 #define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
@@ -39,8 +42,9 @@
 #define RFM69_RST     9 
 #define RFM69_GPIO    19 // Not currently used 
 
-// TODO: CANbus UART Configuration
+// TODO: CANbus/TWAI UART Configuration
 // TODO: Wifi setup
+// TODO: LED status task
 
 // Logging TAG
 static const char *TAG = "ESP32-GPS-RFM69";
@@ -65,15 +69,13 @@ static bool radio_init() {
         return false;
     }
 
-    // Start with conservative/forgiving link params; align to your ground RX later
-    radio.setFrequency(433.920);          // MHz
-    radio.setBitRate(4.8);             // kbps
-    radio.setFrequencyDeviation(50.0);    // kHz
-    radio.setRxBandwidth(125.0);          // kHz
-    radio.setOOK(false);                  // ensure FSK
-    radio.setOutputPower(20);             // dBm (mind regs/antenna)
-
-    uint8_t sw[] = {0x2D, 0xD4};          // sync word — must match receiver
+    // Start with conservative/forgiving link params; align to ground RX later
+    radio.setFrequency(RADIO_FREQ);          
+    radio.setBitRate(BIT_RATE);            
+    radio.setFrequencyDeviation(DEVIATION_FREQ);    
+    radio.setRxBandwidth(RX_BANDWITH);      
+    radio.setOOK(false);                 
+    radio.setOutputPower(OUTPUT_PWR);
     radio.setSyncWord(sw, sizeof(sw));
 
     ESP_LOGI(TAG, "RFM69 ready");
@@ -84,7 +86,7 @@ static bool radio_init() {
 void gps_uart_init() {
     ESP_LOGI(TAG, "Entered GPS function");
     uart_config_t uart_config = {};
-    uart_config.baud_rate = 9600;  // NEO-6M default
+    uart_config.baud_rate = GPS_BAUD_RATE;  
     uart_config.data_bits = UART_DATA_8_BITS;
     uart_config.parity = UART_PARITY_DISABLE;
     uart_config.stop_bits = UART_STOP_BITS_1;
@@ -97,7 +99,7 @@ void gps_uart_init() {
 }
 
 void aprs_init() {
-    packet.source = AX25Address::from_string("KK7SSP-11");
+    packet.source = AX25Address::from_string(CALLSIGN);
     packet.destination = AX25Address::from_string("APRS");
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
@@ -131,8 +133,8 @@ void gps_task(void *pvParameters) {
             // Build compact APRS text (example; keep short!)
             char aprs_text[48] = {};
             snprintf(aprs_text, sizeof(aprs_text),
-                    "=%.5fN/%.5fW Team317",
-                    fabs(gps.location.lat()), fabs(gps.location.lng()));
+                    "=%.5fN/%.5fW Team%d",
+                    fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM);
 
             packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
             std::vector<uint8_t> APRSencoded = packet.encode();
@@ -234,7 +236,7 @@ extern "C" void app_main(void)
 
     xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);
-    //xTaskCreate(espnow_task, "espnow_task", 4096, send_param, 5, NULL);
+    //xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
     
     ESP_LOGI(TAG, "App main completed, tasks started");
 }

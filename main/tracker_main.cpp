@@ -44,9 +44,10 @@
 
 // CANbus/TWAI UART Configuration
 // A CAN transceiver is not a UART device. We should not use the UART driver (use the TWAI (CAN) driver)
-#define TWAI_TX_GPIO  4    // ESP32 -> Transceiver TXD
+#define TWAI_TX_GPIO  4    // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
 #define TWAI_RX_GPIO  5    // Transceiver RXD -> ESP32
 #define TWAI_BITRATE_KBPS 500  // Common, 500k
+#define TWAI_SP_PERMILL   800          // sample point ~80%
 
 // TODO: Wifi setup
 // TODO: LED status task
@@ -108,6 +109,44 @@ void aprs_init() {
     packet.destination = AX25Address::from_string("APRS");
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
+
+// CAN/TWAI: init on-chip controller (pins/bitrate from #defines) and start TX/RX tasks; requires external transceiver + 120Ω termination.
+extern "C" void app_main(void)
+{
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_log_level_set("*", ESP_LOG_INFO);
+
+    printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
+    fflush(stdout);
+
+    // 1) Bring up peripherals
+    gps_uart_init();   // UART1 for GPS
+    aprs_init();       // AX.25/APRS addresses, path, etc.
+
+    // 2) Radio (RFM69)
+    if (!radio_init()) {
+        ESP_LOGE(TAG, "RFM69 init failed; halting.");
+        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    // 3) CAN / TWAI
+    if (!can_init()) {
+        ESP_LOGE(TAG, "[CAN] Init failed; halting.");
+        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    // 4) Start tasks
+    xTaskCreate(can_tx_task, "can_tx_task", 2048, NULL, 5, NULL);
+    xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
+    // Optional if we want to add it:
+    // xTaskCreate(can_alert_task, "can_alert_task", 2048, NULL, 4, NULL);
+
+    xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
+    xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
+
+    ESP_LOGI(TAG, "App main completed, tasks started");
+}
+
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {

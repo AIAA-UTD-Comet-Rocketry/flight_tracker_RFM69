@@ -42,7 +42,12 @@
 #define RFM69_RST     9 
 #define RFM69_GPIO    19 // Not currently used 
 
-// TODO: CANbus/TWAI UART Configuration
+// CANbus/TWAI UART Configuration
+// A CAN transceiver is not a UART device. We should not use the UART driver (use the TWAI (CAN) driver)
+#define TWAI_TX_GPIO  4    // ESP32 -> Transceiver TXD
+#define TWAI_RX_GPIO  5    // Transceiver RXD -> ESP32
+#define TWAI_BITRATE_KBPS 500  // Common, 500k
+
 // TODO: Wifi setup
 // TODO: LED status task
 

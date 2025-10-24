@@ -18,8 +18,7 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "math.h"
-#include "esp_twai.h"
-#include "esp_twai_onchip.h"
+#include "driver/twai.h"
 
 #include <RadioLib.h>
 #include "TinyGPS++.h"
@@ -44,10 +43,8 @@
 
 // CANbus/TWAI UART Configuration
 // A CAN transceiver is not a UART device. We should not use the UART driver (use the TWAI (CAN) driver)
-#define TWAI_TX_GPIO  4    // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
-#define TWAI_RX_GPIO  5    // Transceiver RXD -> ESP32
-#define TWAI_BITRATE_KBPS 500  // Common, 500k
-#define TWAI_SP_PERMILL   800          // sample point ~80%
+#define TWAI_TX_GPIO  4                // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
+#define TWAI_RX_GPIO  5                // Transceiver RXD -> ESP32
 
 // TODO: Wifi setup
 // TODO: LED status task
@@ -110,6 +107,42 @@ void aprs_init() {
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
 
+
+// Initialize CAN Bus 
+void can_bus_init() {
+    ESP_LOGI(TAG, "[CAN] Entering CAN init");
+
+    // Use NO_ACK for single-node bench tests (no second device to ACK).
+    // When there are two nodes, switch to TWAI_MODE_NORMAL.
+    twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(
+        (gpio_num_t)TWAI_TX_GPIO,
+        (gpio_num_t)TWAI_RX_GPIO,
+        TWAI_MODE_NO_ACK  // change to TWAI_MODE_NORMAL when second node present
+    );
+
+    // Keep queues small and enable a few useful alerts
+    g.tx_queue_len = 10;
+    g.rx_queue_len = 10;
+    g.alerts_enabled = TWAI_ALERT_RX_DATA | TWAI_ALERT_TX_DONE |
+                       TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_RECOVERED |
+                       TWAI_ALERT_ERR_PASS | TWAI_ALERT_TX_FAILED;
+
+    // 500 kbit/s is a good default; no need to hand-tune timing yet
+    twai_timing_config_t t = TWAI_TIMING_CONFIG_500KBITS();
+
+    // Accept everything to start; we can filter later
+    twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+    // Install + start. ESP_ERROR_CHECK will log and abort on failure
+    ESP_ERROR_CHECK(twai_driver_install(&g, &t, &f));
+    ESP_ERROR_CHECK(twai_start());
+
+    ESP_LOGI(TAG, "[CAN] Started @500k on TX=%d RX=%d (mode=%s)",
+             TWAI_TX_GPIO, TWAI_RX_GPIO,
+             (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
+}
+
+
 // CAN/TWAI: init on-chip controller (pins/bitrate from #defines) and start TX/RX tasks; requires external transceiver + 120Ω termination.
 extern "C" void app_main(void)
 {
@@ -130,7 +163,7 @@ extern "C" void app_main(void)
     }
 
     // 3) CAN / TWAI
-    if (!can_init()) {
+    if (!can_bus_init()) {
         ESP_LOGE(TAG, "[CAN] Init failed; halting.");
         while (true) vTaskDelay(pdMS_TO_TICKS(1000));
     }

@@ -177,6 +177,21 @@ void radio_test(void *pvParameters) {
     }  
 }
 
+void payload_rx_task(void *pvParameters) {
+    espnow_rx_frame_t f;
+    while (1) {
+        if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
+            // TODO: parse your telemetry payload in f.data[0..f.len-1]
+            ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
+                    f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
+            ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
+            printf("Done.\n");
+            // TODO: forward CAN packets to tranceiver
+
+        }
+    }
+}
+
 static void chipIdEcho() {
     printf("\n=== Starting Chip Identification ===\n");
     fflush(stdout);
@@ -218,20 +233,6 @@ static void chipIdEcho() {
     fflush(stdout);
 }
 
-void payload_rx_task(void *pvParameters) {
-  espnow_rx_frame_t f;
-  while (1) {
-    if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
-      // TODO: parse your telemetry payload in f.data[0..f.len-1]
-      ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
-               f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
-      ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
-        printf("Done.\n");
-      // TODO: forward CAN packets to tranceiver
-
-  }
-}
-
 extern "C" void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -250,7 +251,7 @@ extern "C" void app_main(void)
         while (true) vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
+    xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);
     ESP_ERROR_CHECK(espnow_rx_start(&espnow_q)); // start receiver
     xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);

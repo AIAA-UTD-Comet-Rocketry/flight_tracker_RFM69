@@ -22,10 +22,11 @@
     "freertos.h": "c",
     "cstdint": "cpp",
     "istream": "cpp",
-    "functional": "cpp"
+    "functional": "cpp",
+    "regex": "c"
   },
   "idf.flashType": "UART",
-  "idf.portWin": "COM19",
+  "idf.portWin": "COM10",
   "idf.flashBaudRate": "921600",
   "idf.monitorBaudRate": "115200"
 }

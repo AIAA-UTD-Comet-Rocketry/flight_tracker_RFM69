@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 typedef struct {
-  uint8_t from[6];
+  uint8_t from[6]; // Sender's MAC Address
   int     len;
   uint8_t data[ESPNOW_RX_MAX_LEN];
 } espnow_rx_frame_t;

@@ -35,13 +35,13 @@
 #define BUF_SIZE       1024
 
 // RFM69 SPI Configuration
-#define RFM69_SCK     13 
-#define RFM69_MISO    14 
-#define RFM69_MOSI    11 
-#define RFM69_CS      10 
-#define RFM69_IRQ     46 // G0 Pin in Breakout board 
+#define RFM69_SCK     4 
+#define RFM69_MISO    5 
+#define RFM69_MOSI    6 
+#define RFM69_CS      7 
+#define RFM69_IRQ     8 // G0 Pin in Breakout board 
 #define RFM69_RST     9 
-#define RFM69_GPIO    19 // Not currently used 
+#define RFM69_GPIO    10 // Not currently used 
 
 // TODO: CANbus/TWAI UART Configuration
 // TODO: Wifi setup
@@ -181,12 +181,11 @@ void payload_rx_task(void *pvParameters) {
     espnow_rx_frame_t f;
     while (1) {
         if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
-            // TODO: parse your telemetry payload in f.data[0..f.len-1]
             ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
                     f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
             ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
             printf("Done.\n");
-            // TODO: forward CAN packets to tranceiver
+            // TODO: forward payload data to tranceiver
 
         }
     }

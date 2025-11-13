@@ -15,6 +15,9 @@ static const char *TAG = "espnow_rx";
 static QueueHandle_t s_rx_queue = NULL;
 
 static void on_rx_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  // Filter out data from other MAC addresses
+  if (memcmp(info->src_addr, ESPNOW_SENDER_MAC, 6) != 0)
+    return;
   if (!s_rx_queue || len <= 0) 
     return;
   espnow_rx_frame_t frame = {0};

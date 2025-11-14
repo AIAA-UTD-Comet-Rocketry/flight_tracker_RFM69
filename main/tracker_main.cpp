@@ -145,7 +145,6 @@ void can_bus_init() {
 
 // CAN/TWAI: init on-chip controller (pins/bitrate from #defines) and start TX/RX tasks; requires external transceiver + 120Ω termination.\
 
-
 // Single unified app_main: CAN + Radio + GPS + ESP-NOW
 extern "C" void app_main(void)
 {
@@ -164,7 +163,6 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "RFM69 init failed; halting.");
         while (true) {
             vTaskDelay(pdMS_TO_TICKS(1000));
-        }
     }
 
     // 3) CAN / TWAI
@@ -172,7 +170,6 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "[CAN] Init failed; halting.");
         while (true) {
             vTaskDelay(pdMS_TO_TICKS(1000));
-        }
     }
 
     // 4) Start CAN tasks

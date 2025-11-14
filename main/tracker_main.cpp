@@ -25,6 +25,7 @@
 #include "radiolib_esp32s3_hal.hpp" // include the hardware abstraction layer
 #include "aprs.h"
 #include "global_config.h"
+#include "espnow_rx.h"
 
 // GPS UART Configuration
 #define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
@@ -41,16 +42,15 @@
 #define RFM69_RST     9 
 #define RFM69_GPIO    19 // Not currently used 
 
-// CANbus/TWAI UART Configuration
-// A CAN transceiver is not a UART device. We should not use the UART driver (use the TWAI (CAN) driver)
+// CANbus/TWAI Configuration
 #define TWAI_TX_GPIO  4                // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
 #define TWAI_RX_GPIO  5                // Transceiver RXD -> ESP32
 
 // TODO: Wifi setup
 // TODO: LED status task
 
-// Logging TAG
-static const char *TAG = "ESP32-GPS-RFM69";
+static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG
+static QueueHandle_t espnow_q = NULL;
 
 // Create a new instance of the HAL class
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
@@ -86,7 +86,7 @@ static bool radio_init() {
 }
 
 // Function to Initialize GPS UART
-void gps_uart_init() {
+static void gps_uart_init() {
     ESP_LOGI(TAG, "Entered GPS function");
     uart_config_t uart_config = {};
     uart_config.baud_rate = GPS_BAUD_RATE;  
@@ -101,7 +101,7 @@ void gps_uart_init() {
     ESP_LOGI(TAG, "GPS UART initialized at %d baud on UART%d", uart_config.baud_rate, GPS_UART_NUM);
 }
 
-void aprs_init() {
+static void aprs_init() {
     packet.source = AX25Address::from_string(CALLSIGN);
     packet.destination = AX25Address::from_string("APRS");
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
@@ -143,7 +143,10 @@ void can_bus_init() {
 }
 
 
-// CAN/TWAI: init on-chip controller (pins/bitrate from #defines) and start TX/RX tasks; requires external transceiver + 120Ω termination.
+// CAN/TWAI: init on-chip controller (pins/bitrate from #defines) and start TX/RX tasks; requires external transceiver + 120Ω termination.\
+
+
+// Single unified app_main: CAN + Radio + GPS + ESP-NOW
 extern "C" void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -159,26 +162,36 @@ extern "C" void app_main(void)
     // 2) Radio (RFM69)
     if (!radio_init()) {
         ESP_LOGE(TAG, "RFM69 init failed; halting.");
-        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
 
     // 3) CAN / TWAI
     if (!can_bus_init()) {
         ESP_LOGE(TAG, "[CAN] Init failed; halting.");
-        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
 
-    // 4) Start tasks
+    // 4) Start CAN tasks
     xTaskCreate(can_tx_task, "can_tx_task", 2048, NULL, 5, NULL);
     xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
-    // Optional if we want to add it:
+    // Optional:
     // xTaskCreate(can_alert_task, "can_alert_task", 2048, NULL, 4, NULL);
 
+    // 5) Start radio + GPS tasks
     xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
 
+    // 6) Start ESP-NOW RX + payload task (from second app_main)
+    ESP_ERROR_CHECK(espnow_rx_start(&espnow_q));   // start ESP-NOW receiver queue
+    xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
+
     ESP_LOGI(TAG, "App main completed, tasks started");
 }
+
 
 
 // Main Task for GPS Data Processing
@@ -253,7 +266,22 @@ void radio_test(void *pvParameters) {
     }  
 }
 
-void chipIdEcho() {
+void payload_rx_task(void *pvParameters) {
+    espnow_rx_frame_t f;
+    while (1) {
+        if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
+            // TODO: parse your telemetry payload in f.data[0..f.len-1]
+            ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
+                    f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
+            ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
+            printf("Done.\n");
+            // TODO: forward CAN packets to tranceiver
+
+        }
+    }
+}
+
+static void chipIdEcho() {
     printf("\n=== Starting Chip Identification ===\n");
     fflush(stdout);
     
@@ -294,26 +322,3 @@ void chipIdEcho() {
     fflush(stdout);
 }
 
-extern "C" void app_main(void)
-{
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    
-    //esp_log_level_set("*", ESP_LOG_VERBOSE);
-    esp_log_level_set("*", ESP_LOG_INFO);
-    
-    printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
-    fflush(stdout);
-    
-    //chipIdEcho();
-    gps_uart_init();
-    //radio_hal_Init(); // RFM69 connection
-    if (!radio_init()) {
-        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-
-    xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
-    xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);
-    //xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
-    
-    ESP_LOGI(TAG, "App main completed, tasks started");
-}

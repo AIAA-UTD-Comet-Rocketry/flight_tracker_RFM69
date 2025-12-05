@@ -114,7 +114,6 @@ static void aprs_init() {
     packet.path = { AX25Address::from_string("WIDE1-1"), AX25Address::from_string("WIDE2-1") };
 }
 
-
 // Initialize CAN Bus 
 static void can_bus_init() {
     ESP_LOGI(TAG, "[CAN] Entering CAN init");
@@ -130,7 +129,7 @@ static void can_bus_init() {
     // Keep queues small and enable a few useful alerts
     g.tx_queue_len = 10;
     g.rx_queue_len = 10;
-    g.alerts_enabled = TWAI_ALERT_RX_DATA | TWAI_ALERT_TX_DONE |
+    g.alerts_enabled = TWAI_ALERT_RX_DATA | TWAI_ALERT_TX_SUCCESS |
                        TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_RECOVERED |
                        TWAI_ALERT_ERR_PASS | TWAI_ALERT_TX_FAILED;
 
@@ -148,9 +147,6 @@ static void can_bus_init() {
              TWAI_TX_GPIO, TWAI_RX_GPIO,
              (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
 }
-
-// CAN/TWAI: init on-chip controller (pins/bitrate from #defines) and start TX/RX tasks; requires external transceiver + 120Ω termination.\
-
 
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {

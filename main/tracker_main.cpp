@@ -42,9 +42,9 @@
 #define RFM69_RST     9 
 #define RFM69_GPIO    19 // Not currently used 
 
-// CANbus/TWAI Configuration
-#define TWAI_TX_GPIO  4                // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
-#define TWAI_RX_GPIO  5                // Transceiver RXD -> ESP32
+// CAN/TWAI Configuration
+#define TWAI_TX_GPIO  1                // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
+#define TWAI_RX_GPIO  2                // Transceiver RXD -> ESP32
 
 // TODO: Wifi setup
 // TODO: LED status task
@@ -109,7 +109,7 @@ static void aprs_init() {
 
 
 // Initialize CAN Bus 
-void can_bus_init() {
+static void can_bus_init() {
     ESP_LOGI(TAG, "[CAN] Entering CAN init");
 
     // Use NO_ACK for single-node bench tests (no second device to ACK).
@@ -282,36 +282,26 @@ extern "C" void app_main(void)
     printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
     fflush(stdout);
 
-    // 1) Bring up peripherals
+    // Bring up peripherals
+    //chipIdEcho();
     gps_uart_init();   // UART1 for GPS
     aprs_init();       // AX.25/APRS addresses, path, etc.
 
-    // 2) Radio (RFM69)
+    // Intialize Radio (RFM69)
     if (!radio_init()) {
-        ESP_LOGE(TAG, "RFM69 init failed; halting.");
-        while (true) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    // 3) CAN / TWAI
-    if (!can_bus_init()) {
-        ESP_LOGE(TAG, "[CAN] Init failed; halting.");
-        while (true) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    can_bus_init(); // Intialize CAN / TWAI
 
-    // 4) Start CAN tasks
-    xTaskCreate(can_tx_task, "can_tx_task", 2048, NULL, 5, NULL);
-    xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
-    // Optional:
-    // xTaskCreate(can_alert_task, "can_alert_task", 2048, NULL, 4, NULL);
+    //xTaskCreate(can_tx_task, "can_tx_task", 2048, NULL, 5, NULL);
+    //xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
 
-    // 5) Start radio + GPS tasks
-    xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
+    //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
 
-    // 6) Start ESP-NOW RX + payload task (from second app_main)
-    ESP_ERROR_CHECK(espnow_rx_start(&espnow_q));   // start ESP-NOW receiver queue
+    // Initalize and Start WiFi receiver task
+    ESP_ERROR_CHECK(espnow_rx_start(&espnow_q));   // start ESP-NOW RX queue
     xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "App main completed, tasks started");

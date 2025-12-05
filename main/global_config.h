@@ -2,15 +2,15 @@
 #define GLOBAL_CONFIG_H
 
 #define CALLSIGN            "KK7SSP-11"
-#define IREC_TEAM_NUM       317
+#define IREC_TEAM_NUM       308
 
 // Transceiver config:
-#define RADIO_FREQ          433.920 // MHz (Range from 431.0 - 510.0)
+#define RADIO_FREQ          434.0 // MHz (Range from 431.0 - 510.0)
 #define BIT_RATE            4.8     // kbps
-#define DEVIATION_FREQ      50      // kHz
+#define DEVIATION_FREQ      5      // kHz
 #define RX_BANDWITH         125.0   // kHz
 #define OUTPUT_PWR          20      // dBM
-static const uint8_t sw[] = {0x2D, 0xD4};        // sync word — must match receiver
+static const uint8_t sw[] = {0x12, 0xAD};        // sync word — must match receiver
 
 // GPS config:
 #define GPS_BAUD_RATE       9600    // NEO-6M default

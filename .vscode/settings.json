@@ -26,7 +26,7 @@
     "regex": "c"
   },
   "idf.flashType": "UART",
-  "idf.portWin": "COM10",
+  "idf.portWin": "COM19",
   "idf.flashBaudRate": "921600",
   "idf.monitorBaudRate": "115200"
 }

@@ -71,13 +71,20 @@ static bool radio_init() {
     }
 
     // Start with conservative/forgiving link params; align to ground RX later
-    radio.setFrequency(RADIO_FREQ);          
+    radio.setFrequency(RADIO_FREQ);
+    radio.variablePacketLengthMode(RADIOLIB_RF69_MAX_PACKET_LENGTH);          
     radio.setBitRate(BIT_RATE);            
     radio.setFrequencyDeviation(DEVIATION_FREQ);    
     radio.setRxBandwidth(RX_BANDWITH);      
     radio.setOOK(false);                 
     radio.setOutputPower(OUTPUT_PWR);
     radio.setSyncWord(sw, sizeof(sw));
+    radio.disableAES();
+    radio.disableAddressFiltering();
+    //radio.setCrcFiltering(true);
+    //radio.setPreambleLength(16);
+    //radio.setDataShaping(RADIOLIB_SHAPING_0_5);
+    //radio.setEncoding(RADIOLIB_ENCODING_NRZ);
 
     ESP_LOGI(TAG, "RFM69 ready");
     return true;
@@ -114,7 +121,7 @@ void gps_task(void *pvParameters) {
         int len = uart_read_bytes(GPS_UART_NUM, data, BUF_SIZE, 1000 / portTICK_PERIOD_MS);
         
         if (len > 0) {
-            printf("\n=== GPS Data (Length: %d) ===\n", len);   
+            //printf("\n=== GPS Data (Length: %d) ===\n", len);   
             for (int i = 0; i < len; i++) {
                 gps.encode(data[i]); //Feed NMEA data to tinyGPS++
             }
@@ -136,6 +143,9 @@ void gps_task(void *pvParameters) {
             snprintf(aprs_text, sizeof(aprs_text),
                     "=%.5fN/%.5fW Team%d",
                     fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM);
+            // snprintf(aprs_text, sizeof(aprs_text),
+            //         "=%.5fN/%.5fW Team%d",
+            //         -96.752381, 32.993008, IREC_TEAM_NUM);
 
             packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
             std::vector<uint8_t> APRSencoded = packet.encode();
@@ -161,11 +171,11 @@ void gps_task(void *pvParameters) {
 void radio_test(void *pvParameters) {
 
     while(1) {
-        uint8_t testBuff[8] = {0x07, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
+        //uint8_t testBuff[8] = {0x07, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
         ESP_LOGI(TAG, "[RFM69] Transmitting packet ... ");
-        //state = radio.transmit("Hello World!");
+        int state = radio.transmit("Hello World!!!");
         //transmit(const uint8_t* data, size_t len, uint8_t addr)
-        int state = radio.transmit(testBuff, 8);
+        //int state = radio.transmit(testBuff, 8);
         if (state == RADIOLIB_ERR_NONE) {
             // the packet was successfully transmitted
             ESP_LOGI(TAG, "success!");
@@ -175,7 +185,7 @@ void radio_test(void *pvParameters) {
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }  
-}
+}   
 
 void payload_rx_task(void *pvParameters) {
     espnow_rx_frame_t f;
@@ -250,9 +260,10 @@ extern "C" void app_main(void)
         while (true) vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
+    //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);
-    ESP_ERROR_CHECK(espnow_rx_start(&espnow_q)); // start receiver
+    // Initialize and Start WiFi receiver
+    ESP_ERROR_CHECK(espnow_rx_start(&espnow_q));
     xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
     
     ESP_LOGI(TAG, "App main completed, tasks started");

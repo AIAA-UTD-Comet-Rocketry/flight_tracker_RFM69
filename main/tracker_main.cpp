@@ -29,24 +29,22 @@
 
 // GPS UART Configuration
 #define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
-#define GPS_TX_PIN     17  // TX not needed (GPS is sending data)
-#define GPS_RX_PIN     18  // ESP32 RX (Connect to GPS TX)
+#define GPS_TX_PIN     18  // ESP32 RX (Connect to GPS TX)
+#define GPS_RX_PIN     17  // TX not needed (GPS is sending data)
 #define BUF_SIZE       1024
 
 // RFM69 SPI Configuration
-#define RFM69_SCK     4 
-#define RFM69_MISO    5 
-#define RFM69_MOSI    6 
-#define RFM69_CS      7 
-#define RFM69_IRQ     8 // G0 Pin in Breakout board 
-#define RFM69_RST     9 
-#define RFM69_GPIO    10 // Not currently used 
+#define RFM69_SCK     7 
+#define RFM69_MISO    9 
+#define RFM69_MOSI    8 
+#define RFM69_CS      6 
+#define RFM69_IRQ     4 // G0 Pin in Breakout board 
+#define RFM69_RST     5 
 
 // CAN/TWAI Configuration
-#define TWAI_TX_GPIO  1                // ESP32 -> Transceiver TXD  // (PLEASE REVIEW, MAY NEED TO BE CHANGED)
-#define TWAI_RX_GPIO  2                // Transceiver RXD -> ESP32
+#define TWAI_TX_GPIO  38                // ESP32 -> Transceiver TXD
+#define TWAI_RX_GPIO  37                // Transceiver RXD -> ESP32
 
-// TODO: Wifi setup
 // TODO: LED status task
 
 static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG

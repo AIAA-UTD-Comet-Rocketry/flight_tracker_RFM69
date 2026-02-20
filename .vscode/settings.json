@@ -28,5 +28,6 @@
   "idf.flashType": "UART",
   "idf.portWin": "COM19",
   "idf.flashBaudRate": "921600",
-  "idf.monitorBaudRate": "115200"
+  "idf.monitorBaudRate": "115200",
+  "idf.currentSetup": "C:\\Users\\aades\\esp\\v5.5.1\\esp-idf"
 }

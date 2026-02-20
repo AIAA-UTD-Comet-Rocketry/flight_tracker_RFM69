@@ -54,7 +54,7 @@ static QueueHandle_t espnow_q = NULL;
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
 
 // Radio module instance
-RF69 radio = new Module(hal, RFM69_CS, RFM69_IRQ, RFM69_RST, RFM69_GPIO);
+RF69 radio = new Module(hal, RFM69_CS, RFM69_IRQ, RFM69_RST);
 
 // TinyGPS++ instance
 TinyGPSPlus gps;

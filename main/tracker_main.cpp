@@ -297,7 +297,8 @@ extern "C" void app_main(void)
     can_bus_init(); // Intialize CAN / TWAI
 
     //xTaskCreate(can_tx_task, "can_tx_task", 2048, NULL, 5, NULL);
-    //xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
+    xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL); 
+    // added can_rx_task() and started it
 
     //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
     xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);

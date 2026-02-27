@@ -146,6 +146,37 @@ static void can_bus_init() {
              (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
 }
 
+// CAN RX Task, listens for incoming CAN frames and logs their contents.
+static void can_rx_task(void *arg) {
+    twai_message_t msg;
+
+    while (1) {
+
+        // Attempt to receive a CAN frame (wait up to 1 second)
+        esp_err_t err = twai_receive(&msg, pdMS_TO_TICKS(1000));
+
+        if (err == ESP_OK) {
+            ESP_LOGI("CAN-RX", "ID=0x%03X DLC=%d",
+                     (unsigned)msg.identifier,
+                     msg.data_length_code);
+
+            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
+                char buf[3 * 8 + 1] = {0};
+                for (int i = 0; i < msg.data_length_code && i < 8; i++) {
+                    sprintf(buf + 3 * i, "%02X ", msg.data[i]);
+                }
+                ESP_LOGI("CAN-RX", "Data: %s", buf);
+            }
+
+        }
+        // Any other error (other than timeout) is logged to help diagnose issues.
+        else if (err != ESP_ERR_TIMEOUT) {
+            ESP_LOGW("CAN-RX", "Receive error: %s",
+                     esp_err_to_name(err));
+        }
+    }
+}
+
 // Main Task for GPS Data Processing
 void gps_task(void *pvParameters) {
     ESP_LOGI(TAG, "Entering GPS task");
@@ -229,7 +260,7 @@ void payload_rx_task(void *pvParameters) {
                     f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
             ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
             printf("Done.\n");
-            // TODO: forward payload data to tranceiver
+            // TODO: forward payload data to transceiver
 
         }
     }

@@ -26,6 +26,7 @@
 #include "aprs.h"
 #include "global_config.h"
 #include "espnow_rx.h"
+#include "canaerospace.h"
 
 // GPS UART Configuration
 #define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
@@ -47,8 +48,13 @@
 
 // TODO: LED status task
 
+// TODO: Add MAX17048 Batt Mon. I2C driver
+#define BM_SDA  33
+#define BM_SCL  34
+
 static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG
 static QueueHandle_t espnow_q = NULL;
+static SemaphoreHandle_t s_radio_mutex = NULL;
 
 // Create a new instance of the HAL class
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
@@ -147,6 +153,7 @@ static void can_bus_init() {
 }
 
 // CAN RX Task, listens for incoming CAN frames and logs their contents.
+// Telemetry data from Flight Computer
 static void can_rx_task(void *arg) {
     twai_message_t msg;
 
@@ -166,6 +173,30 @@ static void can_rx_task(void *arg) {
                     sprintf(buf + 3 * i, "%02X ", msg.data[i]);
                 }
                 ESP_LOGI("CAN-RX", "Data: %s", buf);
+            }
+
+            // Parse as CANaerospace and forward over RF
+            canas_msg_t canas;
+            if (canas_parse(&msg, &canas)) {
+                char aprs_text[32];
+                canas_format_aprs(&canas, aprs_text, sizeof(aprs_text));
+
+                // Use a task-local packet to avoid racing with gps_task on the global `packet`
+                APRSPacket can_pkt;
+                can_pkt.source      = packet.source;
+                can_pkt.destination = packet.destination;
+                can_pkt.path        = packet.path;
+                can_pkt.payload     = std::string(aprs_text);
+
+                std::vector<uint8_t> encoded = can_pkt.encode();
+                if (encoded.size() < 64) {
+                    if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                        int st = radio.transmit(encoded.data(), encoded.size());
+                        xSemaphoreGive(s_radio_mutex);
+                        ESP_LOGI("CAN-RX", "RF TX %s payload=%s",
+                                 st == RADIOLIB_ERR_NONE ? "ok" : "fail", aprs_text);
+                    }
+                }
             }
 
         }
@@ -221,8 +252,11 @@ void gps_task(void *pvParameters) {
              * Reduce comment field lengths or split transmission into multiple packets.
              */
             if (APRSencoded.size() < 64) {
-                int st = radio.transmit(APRSencoded.data(), APRSencoded.size());  // enable once ready
-                ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)APRSencoded.size());
+                if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                    int st = radio.transmit(APRSencoded.data(), APRSencoded.size());
+                    xSemaphoreGive(s_radio_mutex);
+                    ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)APRSencoded.size());
+                }
             } else {
                 ESP_LOGW(TAG, "APRS frame %uB exceeds RFM69 FIFO", (unsigned)APRSencoded.size());
             }
@@ -258,10 +292,29 @@ void payload_rx_task(void *pvParameters) {
         if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
             ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
                     f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
-            ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
-            printf("Done.\n");
-            // TODO: forward payload data to transceiver
 
+            // Hex-encode raw CANAS payload with "W:" prefix (pass-through relay)
+            char aprs_text[34] = {0};
+            int pos = snprintf(aprs_text, sizeof(aprs_text), "W:");
+            for (int i = 0; i < f.len && pos + 2 < (int)sizeof(aprs_text); i++) {
+                pos += snprintf(aprs_text + pos, sizeof(aprs_text) - pos, "%02X", f.data[i]);
+            }
+
+            APRSPacket wifi_pkt;
+            wifi_pkt.source      = packet.source;
+            wifi_pkt.destination = packet.destination;
+            wifi_pkt.path        = packet.path;
+            wifi_pkt.payload     = std::string(aprs_text);
+
+            std::vector<uint8_t> encoded = wifi_pkt.encode();
+            if (encoded.size() < 64) {
+                if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                    int st = radio.transmit(encoded.data(), encoded.size());
+                    xSemaphoreGive(s_radio_mutex);
+                    ESP_LOGI("Wifi-RX", "RF TX %s payload=%s",
+                             st == RADIOLIB_ERR_NONE ? "ok" : "fail", aprs_text);
+                }
+            }
         }
     }
 }
@@ -314,6 +367,8 @@ extern "C" void app_main(void)
 
     printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
     fflush(stdout);
+
+    s_radio_mutex = xSemaphoreCreateMutex();
 
     // Bring up peripherals
     //chipIdEcho();

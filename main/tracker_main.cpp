@@ -26,6 +26,7 @@
 #include "aprs.h"
 #include "global_config.h"
 #include "espnow_rx.h"
+#include "canaerospace.h"
 
 // GPS UART Configuration
 #define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
@@ -47,8 +48,13 @@
 
 // TODO: LED status task
 
+// TODO: Add MAX17048 Batt Mon. I2C driver
+#define BM_SDA  33
+#define BM_SCL  34
+
 static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG
 static QueueHandle_t espnow_q = NULL;
+static SemaphoreHandle_t s_radio_mutex = NULL;
 
 // Create a new instance of the HAL class
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
@@ -121,7 +127,7 @@ static void can_bus_init() {
     twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(
         (gpio_num_t)TWAI_TX_GPIO,
         (gpio_num_t)TWAI_RX_GPIO,
-        TWAI_MODE_NO_ACK  // change to TWAI_MODE_NORMAL when second node present
+        TWAI_MODE_NORMAL  // change to TWAI_MODE_NORMAL when second node present
     );
 
     // Keep queues small and enable a few useful alerts
@@ -147,6 +153,7 @@ static void can_bus_init() {
 }
 
 // CAN RX Task, listens for incoming CAN frames and logs their contents.
+// Telemetry data from Flight Computer
 static void can_rx_task(void *arg) {
     twai_message_t msg;
 
@@ -166,6 +173,30 @@ static void can_rx_task(void *arg) {
                     sprintf(buf + 3 * i, "%02X ", msg.data[i]);
                 }
                 ESP_LOGI("CAN-RX", "Data: %s", buf);
+            }
+
+            // Parse as CANaerospace and forward over RF
+            canas_msg_t canas;
+            if (canas_parse(&msg, &canas)) {
+                char aprs_text[32];
+                canas_format_aprs(&canas, aprs_text, sizeof(aprs_text));
+
+                // Use a task-local packet to avoid racing with gps_task on the global `packet`
+                APRSPacket can_pkt;
+                can_pkt.source      = packet.source;
+                can_pkt.destination = packet.destination;
+                can_pkt.path        = packet.path;
+                can_pkt.payload     = std::string(aprs_text);
+
+                std::vector<uint8_t> encoded = can_pkt.encode();
+                if (encoded.size() < 64) {
+                    if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                        int st = radio.transmit(encoded.data(), encoded.size());
+                        xSemaphoreGive(s_radio_mutex);
+                        ESP_LOGI("CAN-RX", "RF TX %s payload=%s",
+                                 st == RADIOLIB_ERR_NONE ? "ok" : "fail", aprs_text);
+                    }
+                }
             }
 
         }
@@ -221,8 +252,11 @@ void gps_task(void *pvParameters) {
              * Reduce comment field lengths or split transmission into multiple packets.
              */
             if (APRSencoded.size() < 64) {
-                int st = radio.transmit(APRSencoded.data(), APRSencoded.size());  // enable once ready
-                ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)APRSencoded.size());
+                if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                    int st = radio.transmit(APRSencoded.data(), APRSencoded.size());
+                    xSemaphoreGive(s_radio_mutex);
+                    ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)APRSencoded.size());
+                }
             } else {
                 ESP_LOGW(TAG, "APRS frame %uB exceeds RFM69 FIFO", (unsigned)APRSencoded.size());
             }
@@ -231,6 +265,33 @@ void gps_task(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay
     }
 }
+
+// CAN TX task for testing CAN bus transceiver
+// Sends a counter frame every second on ID 0x100
+// static void can_tx_task(void *arg) {
+//     uint32_t counter = 0;
+
+//     while (1) {
+//         twai_message_t tx_msg = {};
+//         tx_msg.identifier = 0x100;
+//         tx_msg.data_length_code = 4;
+//         tx_msg.data[0] = (counter >> 24) & 0xFF;
+//         tx_msg.data[1] = (counter >> 16) & 0xFF;
+//         tx_msg.data[2] = (counter >>  8) & 0xFF;
+//         tx_msg.data[3] = (counter      ) & 0xFF;
+
+//         esp_err_t err = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));
+//         if (err == ESP_OK) {
+//             ESP_LOGI("CAN-TX", "Sent ID=0x%03X counter=%lu",
+//                      (unsigned)tx_msg.identifier, (unsigned long)counter);
+//         } else {
+//             ESP_LOGW("CAN-TX", "TX failed: %s", esp_err_to_name(err));
+//         }
+
+//         counter++;
+//         vTaskDelay(pdMS_TO_TICKS(1000));
+//     }
+// }
 
 // Radio task for testing transcievers
 void radio_test(void *pvParameters) {
@@ -258,10 +319,29 @@ void payload_rx_task(void *pvParameters) {
         if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
             ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
                     f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
-            ESP_LOGI("Wifi-RX", "Data: %s", f.data);  
-            printf("Done.\n");
-            // TODO: forward payload data to transceiver
 
+            // Hex-encode raw CANAS payload with "W:" prefix (pass-through relay)
+            char aprs_text[34] = {0};
+            int pos = snprintf(aprs_text, sizeof(aprs_text), "W:");
+            for (int i = 0; i < f.len && pos + 2 < (int)sizeof(aprs_text); i++) {
+                pos += snprintf(aprs_text + pos, sizeof(aprs_text) - pos, "%02X", f.data[i]);
+            }
+
+            APRSPacket wifi_pkt;
+            wifi_pkt.source      = packet.source;
+            wifi_pkt.destination = packet.destination;
+            wifi_pkt.path        = packet.path;
+            wifi_pkt.payload     = std::string(aprs_text);
+
+            std::vector<uint8_t> encoded = wifi_pkt.encode();
+            if (encoded.size() < 64) {
+                if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                    int st = radio.transmit(encoded.data(), encoded.size());
+                    xSemaphoreGive(s_radio_mutex);
+                    ESP_LOGI("Wifi-RX", "RF TX %s payload=%s",
+                             st == RADIOLIB_ERR_NONE ? "ok" : "fail", aprs_text);
+                }
+            }
         }
     }
 }
@@ -315,6 +395,8 @@ extern "C" void app_main(void)
     printf("\n\n=== ESP32 Flight Tracker Starting ===\n");
     fflush(stdout);
 
+    s_radio_mutex = xSemaphoreCreateMutex();
+
     // Bring up peripherals
     //chipIdEcho();
     gps_uart_init();   // UART1 for GPS
@@ -328,11 +410,10 @@ extern "C" void app_main(void)
     can_bus_init(); // Intialize CAN / TWAI
 
     //xTaskCreate(can_tx_task, "can_tx_task", 2048, NULL, 5, NULL);
-    xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL); 
-    // added can_rx_task() and started it
+    xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
 
     //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
-    xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
+    //xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
 
     // Initalize and Start WiFi receiver task
     ESP_ERROR_CHECK(espnow_rx_start(&espnow_q));   // start ESP-NOW RX queue

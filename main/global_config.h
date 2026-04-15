@@ -18,7 +18,7 @@ static const uint8_t sw[] = {0x12, 0xAD};        // sync word — must match rec
 // Wifi config:
 #define ESPNOW_CHANNEL      6       // must match sender’s channel
 #define ESPNOW_IFACE        WIFI_IF_STA       // WIFI_IF_STA or WIFI_IF_AP
-static const uint8_t ESPNOW_SENDER_MAC[6] = { 0xB0, 0x81, 0x84, 0x9B, 0xAB, 0x70 }; // Payload ESP32
+static const uint8_t ESPNOW_SENDER_MAC[6] = { 0xE8, 0xF6, 0x0A, 0x8D, 0xBA, 0x54 }; // Payload ESP32
 // Queue sizing for received frames
 #define ESPNOW_RX_QUEUE_LEN   16
 #define ESPNOW_RX_MAX_LEN     32               // 32 bytes typical payload

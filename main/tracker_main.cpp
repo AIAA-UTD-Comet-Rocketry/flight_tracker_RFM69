@@ -29,37 +29,7 @@
 #include "led_status.h"
 #include "canaerospace.h"
 
-// GPS UART Configuration
-#define GPS_UART_NUM   UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
-#define GPS_TX_PIN     18  // ESP32 RX (Connect to GPS TX)
-#define GPS_RX_PIN     17  // TX not needed (GPS is sending data)
-#define BUF_SIZE       1024
-
-// RFM69 SPI Configuration
-#define RFM69_SCK     7 
-#define RFM69_MISO    9 
-#define RFM69_MOSI    8 
-#define RFM69_CS      6 
-#define RFM69_IRQ     4 // G0 Pin in Breakout board 
-#define RFM69_RST     5 
-
-// CAN/TWAI Configuration
-#define TWAI_TX_GPIO  38                // ESP32 -> Transceiver TXD
-#define TWAI_RX_GPIO  37                // Transceiver RXD -> ESP32
-
-// LED status pins
-#define LED_GPS_PIN    34
-#define LED_RF_PIN     35
-#define LED_CANRX_PIN  33
-#define LED_CANTX_PIN  26
-#define LED_WIFI_PIN   36
-#define LED_STATUS_PIN 21
-
-// TODO: BMS Voltage reading
-
 // TODO: Add MAX17048 Batt Mon. I2C driver
-#define BM_SDA  33
-#define BM_SCL  34
 
 static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG
 static QueueHandle_t espnow_q = NULL;
@@ -87,8 +57,8 @@ static bool radio_init() {
 
     // Start with conservative/forgiving link params; align to ground RX later
     radio.setFrequency(RADIO_FREQ);
-    //radio.variablePacketLengthMode(RADIOLIB_RF69_MAX_PACKET_LENGTH);     
-    radio.variablePacketLengthMode(32);      
+    radio.variablePacketLengthMode(RADIOLIB_RF69_MAX_PACKET_LENGTH);     
+    //radio.variablePacketLengthMode(32);      
     radio.setBitRate(BIT_RATE);            
     radio.setFrequencyDeviation(DEVIATION_FREQ);    
     radio.setRxBandwidth(RX_BANDWITH);      
@@ -98,7 +68,7 @@ static bool radio_init() {
     radio.disableAES();
     radio.disableAddressFiltering();
     radio.setCrcFiltering(false);
-    radio.setPreambleLength(16);
+    radio.setPreambleLength(PREAMBLE_LENGTH);
     radio.setDataShaping(RADIOLIB_SHAPING_NONE);
     radio.setEncoding(RADIOLIB_ENCODING_NRZ);
 
@@ -171,6 +141,12 @@ void led_status_init(void) {
         gpio_set_level(led_table[i].pin, 0);
     }
 
+    led_signal(LED_EVT_WIFI_RX);
+    led_signal(LED_EVT_RF_TX);
+    led_signal(LED_EVT_GPS_TX)
+    led_signal(LED_EVT_CAN_RX);
+    led_signal(LED_EVT_CAN_TX);
+
     ESP_LOGI(TAG, "LED status task started");
 }
 
@@ -185,6 +161,8 @@ static void can_rx_task(void *arg) {
         esp_err_t err = twai_receive(&msg, pdMS_TO_TICKS(1000));
 
         if (err == ESP_OK) {
+            led_signal(LED_EVT_CAN_RX);
+
             ESP_LOGI("CAN-RX", "ID=0x%03X DLC=%d",
                      (unsigned)msg.identifier,
                      msg.data_length_code);
@@ -196,7 +174,6 @@ static void can_rx_task(void *arg) {
                 }
                 ESP_LOGI("CAN-RX", "Data: %s", buf);
             }
-            led_signal(LED_EVT_RF_TX);
 
             // Parse as CANaerospace and forward over RF
             canas_msg_t canas;
@@ -215,13 +192,13 @@ static void can_rx_task(void *arg) {
                 if (encoded.size() < 64) {
                     if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
                         int st = radio.transmit(encoded.data(), encoded.size());
+                        led_signal(LED_EVT_RF_TX);
                         xSemaphoreGive(s_radio_mutex);
                         ESP_LOGI("CAN-RX", "RF TX %s payload=%s",
                                  st == RADIOLIB_ERR_NONE ? "ok" : "fail", aprs_text);
                     }
                 }
             }
-
         }
         // Any other error (other than timeout) is logged to help diagnose issues.
         else if (err != ESP_ERR_TIMEOUT) {
@@ -248,8 +225,10 @@ void gps_task(void *pvParameters) {
             printf("No GPS data received in last second\n");
         }
 
-        //if (gps.location.isUpdated()) {
-        if (1) {
+        if (gps.location.isUpdated()) {
+        //if (1) {
+            led_signal(LED_EVT_GPS_TX);
+
             char gps_buffer[64] = {};
             snprintf(gps_buffer, sizeof(gps_buffer),
                     "Lat=%.6f, Lon=%.6f, Time=%02d:%02d:%02d, Sats=%ld",
@@ -258,14 +237,14 @@ void gps_task(void *pvParameters) {
                     gps.satellites.value());
             ESP_LOGI(TAG, "%s", gps_buffer);
 
-            // Build compact APRS text (example; keep short!)
+            // Build compact APRS text
             char aprs_text[48] = {};
-            // snprintf(aprs_text, sizeof(aprs_text),
-            //         "=%.5fN/%.5fW Team%d",
-            //         fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM);
             snprintf(aprs_text, sizeof(aprs_text),
                     "=%.5fN/%.5fW Team%d",
-                    -96.752381, 32.993008, IREC_TEAM_NUM);
+                    fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM);
+            // snprintf(aprs_text, sizeof(aprs_text),
+            //         "=%.5fN/%.5fW Team%d",
+            //         -96.752381, 32.993008, IREC_TEAM_NUM);
 
             packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
             std::vector<uint8_t> APRSencoded = packet.encode();
@@ -278,13 +257,13 @@ void gps_task(void *pvParameters) {
             if (APRSencoded.size() < 64) {
                 if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
                     int st = radio.transmit(APRSencoded.data(), APRSencoded.size());
+                    led_signal(LED_EVT_RF_TX);
                     xSemaphoreGive(s_radio_mutex);
                     ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)APRSencoded.size());
                 }
             } else {
                 ESP_LOGW(TAG, "APRS frame %uB exceeds RFM69 FIFO", (unsigned)APRSencoded.size());
             }
-            led_signal(LED_EVT_GPS_TX);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay
@@ -381,6 +360,8 @@ void payload_rx_task(void *pvParameters) {
     espnow_rx_frame_t f;
     while (1) {
         if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
+            led_signal(LED_EVT_WIFI_RX);
+
             ESP_LOGI("Wifi-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
                     f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
 
@@ -401,6 +382,7 @@ void payload_rx_task(void *pvParameters) {
             if (encoded.size() < 64) {
                 if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
                     int st = radio.transmit(encoded.data(), encoded.size());
+                    led_signal(LED_EVT_RF_TX);
                     xSemaphoreGive(s_radio_mutex);
                     ESP_LOGI("Wifi-RX", "RF TX %s payload=%s",
                              st == RADIOLIB_ERR_NONE ? "ok" : "fail", aprs_text);
@@ -462,11 +444,11 @@ extern "C" void app_main(void)
     s_radio_mutex = xSemaphoreCreateMutex();
 
     // Bring up peripherals
-    //chipIdEcho();
+    chipIdEcho();
     gps_uart_init();   // UART1 for GPS
     aprs_init();       // AX.25/APRS addresses, path, etc.
     can_bus_init(); // Intialize CAN / TWAI
-    led_status_init() // Initialize LED Array Driver
+    led_status_init(); // Initialize LED Array Driver
 
     // Intialize Radio (RFM69)
     if (!radio_init()) {
@@ -478,13 +460,13 @@ extern "C" void app_main(void)
     xTaskCreate(can_rx_task, "can_rx_task", 4096, NULL, 5, NULL);
 
     //xTaskCreate(radio_test, "radio_test", 2048, NULL, 5, NULL);
-    //xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
+    xTaskCreate(gps_task,   "gps_task",   4096, NULL, 5, NULL);
 
     // Initalize and Start WiFi receiver task
     ESP_ERROR_CHECK(espnow_rx_start(&espnow_q));   // start ESP-NOW RX queue
     xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
     
-    xTaskCreate(led_task, "led_task", 2048, NULL, 5, NULL);
+    xTaskCreate(led_task, "led_task", 2048, NULL, 5, NULL); // Start LED task
 
     ESP_LOGI(TAG, "App main completed, tasks started");
 }

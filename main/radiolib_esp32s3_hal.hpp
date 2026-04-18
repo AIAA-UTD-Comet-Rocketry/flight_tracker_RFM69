@@ -119,6 +119,8 @@ class EspHal : public RadioLibHal {
     gpio_set_intr_type((gpio_num_t)interruptNum, GPIO_INTR_DISABLE);
   }
 
+  //void yield() override { vTaskDelay(pdMS_TO_TICKS(2)); }
+
   void delay(unsigned long ms) override { vTaskDelay(ms / portTICK_PERIOD_MS); }
 
   void delayMicroseconds(unsigned long us) override {

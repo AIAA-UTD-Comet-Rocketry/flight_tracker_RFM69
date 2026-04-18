@@ -14,6 +14,10 @@
 #define RFM69_IRQ       4   // G0 Pin in Breakout board 
 #define RFM69_RST       5 
 
+// CAN/TWAI Pins
+#define TWAI_TX_GPIO    38  // ESP32 -> Transceiver TXD
+#define TWAI_RX_GPIO    37  // Transceiver RXD -> ESP32
+
 // LED Status Pins
 #define LED_GPS_PIN     34
 #define LED_RF_PIN      35

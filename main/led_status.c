@@ -2,6 +2,7 @@
 #include "led_status.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "global_config.h"
 
 #define BLINK_MS       50   // short pulse so it doesn't block visual feedback
 
@@ -71,4 +72,22 @@ void led_task(void *arg) {
         // Restore status LED to solid on (system OK)
         gpio_set_level(LED_STATUS_PIN, 1);
     }
+}
+
+void led_status_init(void) {
+    s_led_events = xEventGroupCreate();
+
+    for (int i = 0; i < LED_COUNT; i++) {
+        gpio_reset_pin(led_table[i].pin);
+        gpio_set_direction(led_table[i].pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(led_table[i].pin, 0);
+    }
+
+    led_signal(LED_EVT_WIFI_RX);
+    led_signal(LED_EVT_RF_TX);
+    led_signal(LED_EVT_GPS_TX)
+    led_signal(LED_EVT_CAN_RX);
+    led_signal(LED_EVT_CAN_TX);
+
+    ESP_LOGI(TAG, "LED status task started");
 }

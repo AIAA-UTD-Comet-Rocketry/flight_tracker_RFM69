@@ -132,24 +132,6 @@ static void can_bus_init() {
              (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
 }
 
-void led_status_init(void) {
-    s_led_events = xEventGroupCreate();
-
-    for (int i = 0; i < LED_COUNT; i++) {
-        gpio_reset_pin(led_table[i].pin);
-        gpio_set_direction(led_table[i].pin, GPIO_MODE_OUTPUT);
-        gpio_set_level(led_table[i].pin, 0);
-    }
-
-    led_signal(LED_EVT_WIFI_RX);
-    led_signal(LED_EVT_RF_TX);
-    led_signal(LED_EVT_GPS_TX)
-    led_signal(LED_EVT_CAN_RX);
-    led_signal(LED_EVT_CAN_TX);
-
-    ESP_LOGI(TAG, "LED status task started");
-}
-
 // CAN RX Task, listens for incoming CAN frames and logs their contents.
 // Telemetry data from Flight Computer
 static void can_rx_task(void *arg) {

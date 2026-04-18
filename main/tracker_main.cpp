@@ -46,7 +46,15 @@
 #define TWAI_TX_GPIO  38                // ESP32 -> Transceiver TXD
 #define TWAI_RX_GPIO  37                // Transceiver RXD -> ESP32
 
-// TODO: LED status task
+// LED status pins
+#define LED_GPS_PIN    34
+#define LED_RF_PIN     35
+#define LED_CANRX_PIN  33
+#define LED_CANTX_PIN  26
+#define LED_WIFI_PIN   36
+#define LED_STATUS_PIN 21
+
+// TODO: BMS Voltage reading
 
 static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG
 static QueueHandle_t espnow_q = NULL;
@@ -146,6 +154,18 @@ static void can_bus_init() {
     ESP_LOGI(TAG, "[CAN] Started @500k on TX=%d RX=%d (mode=%s)",
              TWAI_TX_GPIO, TWAI_RX_GPIO,
              (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
+}
+
+void led_status_init(void) {
+    s_led_events = xEventGroupCreate();
+
+    for (int i = 0; i < LED_COUNT; i++) {
+        gpio_reset_pin(led_table[i].pin);
+        gpio_set_direction(led_table[i].pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(led_table[i].pin, 0);
+    }
+
+    ESP_LOGI(TAG, "LED status task started");
 }
 
 // CAN RX Task, listens for incoming CAN frames and logs their contents.

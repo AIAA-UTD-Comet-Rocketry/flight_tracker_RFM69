@@ -3,13 +3,6 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 
-// GPIO pin assignments - adjust to your board
-#define LED_GPS_PIN    34
-#define LED_RF_PIN     35
-#define LED_CAN_PIN    33
-#define LED_WIFI_PIN   36
-#define LED_STATUS_PIN 21
-
 #define BLINK_MS       50   // short pulse so it doesn't block visual feedback
 
 static const char *TAG = "LED";
@@ -23,7 +16,8 @@ typedef struct {
 static const led_map_t led_table[] = {
     { LED_EVT_GPS_TX,  LED_GPS_PIN    },
     { LED_EVT_RF_TX,   LED_RF_PIN     },
-    { LED_EVT_CAN_RX,  LED_CAN_PIN   },
+    { LED_EVT_CAN_RX,  LED_CANRX_PIN   },
+    { LED_EVT_CAN_TX,  LED_CANTX_PIN   },
     { LED_EVT_WIFI_RX, LED_WIFI_PIN   },
     { LED_EVT_ERROR,   LED_STATUS_PIN },
 };
@@ -35,7 +29,7 @@ void led_signal(uint32_t evt_bit) {
 
 void led_task(void *arg) {
     const uint32_t ALL_BITS = LED_EVT_GPS_TX | LED_EVT_RF_TX |
-                              LED_EVT_CAN_RX | LED_EVT_WIFI_RX | LED_EVT_ERROR;
+                              LED_EVT_CAN_RX | LED_EVT_CAN_TX | LED_EVT_WIFI_RX | LED_EVT_ERROR;
 
     // Status LED solid on = system OK
     gpio_set_level(LED_STATUS_PIN, 1);
@@ -77,17 +71,4 @@ void led_task(void *arg) {
         // Restore status LED to solid on (system OK)
         gpio_set_level(LED_STATUS_PIN, 1);
     }
-}
-
-void led_status_init(void) {
-    s_led_events = xEventGroupCreate();
-
-    for (int i = 0; i < LED_COUNT; i++) {
-        gpio_reset_pin(led_table[i].pin);
-        gpio_set_direction(led_table[i].pin, GPIO_MODE_OUTPUT);
-        gpio_set_level(led_table[i].pin, 0);
-    }
-
-    
-    ESP_LOGI(TAG, "LED status task started");
 }

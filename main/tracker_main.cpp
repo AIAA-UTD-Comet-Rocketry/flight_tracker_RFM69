@@ -63,7 +63,7 @@ static bool radio_init() {
     radio.setFrequencyDeviation(DEVIATION_FREQ);    
     radio.setRxBandwidth(RX_BANDWITH);      
     radio.setOOK(false);                 
-    radio.setOutputPower(OUTPUT_PWR);
+    radio.setOutputPower(OUTPUT_PWR, true);
     radio.setSyncWord(sw, sizeof(sw));
     radio.disableAES();
     radio.disableAddressFiltering();
@@ -199,6 +199,7 @@ void gps_task(void *pvParameters) {
         int len = uart_read_bytes(GPS_UART_NUM, data, BUF_SIZE, 1000 / portTICK_PERIOD_MS);
         
         if (len > 0) {
+            led_signal(LED_EVT_GPS_TX);
             //printf("\n=== GPS Data (Length: %d) ===\n", len);   
             for (int i = 0; i < len; i++) {
                 gps.encode(data[i]); //Feed NMEA data to tinyGPS++
@@ -209,7 +210,6 @@ void gps_task(void *pvParameters) {
 
         if (gps.location.isUpdated()) {
         //if (1) {
-            led_signal(LED_EVT_GPS_TX);
 
             char gps_buffer[64] = {};
             snprintf(gps_buffer, sizeof(gps_buffer),

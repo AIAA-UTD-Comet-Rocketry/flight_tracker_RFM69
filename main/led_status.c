@@ -85,7 +85,7 @@ void led_status_init(void) {
 
     led_signal(LED_EVT_WIFI_RX);
     led_signal(LED_EVT_RF_TX);
-    led_signal(LED_EVT_GPS_TX)
+    led_signal(LED_EVT_GPS_TX);
     led_signal(LED_EVT_CAN_RX);
     led_signal(LED_EVT_CAN_TX);
 

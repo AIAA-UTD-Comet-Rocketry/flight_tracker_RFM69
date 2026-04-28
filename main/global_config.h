@@ -3,8 +3,8 @@
 
 /* BOARD GPIO PINOUT */
 // GPS UART Pins
-#define GPS_TX_PIN      18  // ESP32 RX (Connect to GPS TX)
-#define GPS_RX_PIN      17  // TX not needed (GPS is sending data)
+#define GPS_TX_PIN      17  // ESP32 RX (Connect to GPS TX)
+#define GPS_RX_PIN      18  // TX not needed (GPS is sending data)
 
 // RFM69 SPI Pins
 #define RFM69_SCK       7 
@@ -27,8 +27,8 @@
 #define LED_STATUS_PIN  21
 
 // BMS I2C Pins
-#define I2C_SDA         33
-#define I2C_SCL         34
+#define I2C_SDA         37
+#define I2C_SCL         38
 
 
 #define CALLSIGN            "KK7SSP-11"

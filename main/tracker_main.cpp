@@ -59,8 +59,7 @@ static bool radio_init() {
 
     // Start with conservative/forgiving link params; align to ground RX later
     radio.setFrequency(RADIO_FREQ);
-    radio.variablePacketLengthMode(RADIOLIB_RF69_MAX_PACKET_LENGTH);     
-    //radio.variablePacketLengthMode(32);      
+    radio.variablePacketLengthMode(RADIOLIB_RF69_MAX_PACKET_LENGTH);           
     radio.setBitRate(BIT_RATE);            
     radio.setFrequencyDeviation(DEVIATION_FREQ);    
     radio.setRxBandwidth(RX_BANDWITH);      
@@ -196,19 +195,20 @@ void gps_task(void *pvParameters) {
                     gps.satellites.value());
             ESP_LOGI(TAG, "%s", gps_buffer);
 
-            // Build compact APRS text
+            // Build compact APRS text: GPS long, lat, team #, batt voltage
             char aprs_text[48] = {};
             int aprs_len = snprintf(aprs_text, sizeof(aprs_text),
-                    "=%.5fN/%.5fWTeam%d",
-                    fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM);
+                    "=%.5fN/%.5fWTeam%dV%.2f",
+                    fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM, g_batt_voltage);
             // snprintf(aprs_text, sizeof(aprs_text),
             //         "=%.5fN/%.5fW Team%d",
             //         -96.752381, 32.993008, IREC_TEAM_NUM);
             
             // Add battery voltage reading to APRS text when updated
-            float bv = 0;
-            if (bv > 0.0f && aprs_len > 0 && aprs_len < (int)sizeof(aprs_text))
-                snprintf(aprs_text + aprs_len, sizeof(aprs_text) - aprs_len, "V%.2f", bv);
+            // float bv = 0;
+            //bv = g_batt_voltage;
+            // if (bv > 0.0f && aprs_len > 0 && aprs_len < (int)sizeof(aprs_text))
+            //     snprintf(aprs_text + aprs_len, sizeof(aprs_text) - aprs_len, "V%.2f", bv);
 
             packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
             std::vector<uint8_t> APRSencoded = packet.encode();

@@ -1,4 +1,46 @@
 dependencies:
+  espressif/cmake_utilities:
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 0.5.3
+  espressif/i2c_bus:
+    component_hash: 799dfe7539755576431d3a8970335c230dcfa395af5e5ffd3abe570943bb5c2b
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>=4.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.1.0
+  espressif/max17048:
+    component_hash: 8b72109002668a9032c9336531e724663babc2e4ff92699bb41cd42f5336b7fd
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: espressif/i2c_bus
+      registry_url: https://components.espressif.com
+      require: private
+      version: 1.1.*
+    - name: idf
+      require: private
+      version: '>=4.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.1.2
   idf:
     source:
       type: idf
@@ -14,8 +56,9 @@ dependencies:
       type: service
     version: 7.3.0
 direct_dependencies:
+- espressif/max17048
 - idf
 - jgromes/radiolib
-manifest_hash: fdaaedc36a5b693f6f0887342baaafb54f874aff5e809ccccb487f8551278e99
+manifest_hash: 77aad6f62764a726e542cdc04688e97bc1da45d2fdd3d82a1ee7c07d355d4a21
 target: esp32s3
 version: 2.0.0

@@ -28,12 +28,15 @@
 #include "espnow_rx.h"
 #include "led_status.h"
 #include "canaerospace.h"
+#include "max17048.h"
 
 // TODO: Add MAX17048 Batt Mon. I2C driver
 
 static const char *TAG = "ESP32-GPS-RFM69"; // Logging TAG
 static QueueHandle_t espnow_q = NULL;
 static SemaphoreHandle_t s_radio_mutex = NULL;
+static i2c_bus_handle_t i2c_bus = NULL;
+static max17048_handle_t max17048 = NULL;
 
 // Create a new instance of the HAL class
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
@@ -132,9 +135,39 @@ static void can_bus_init() {
              (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
 }
 
+static void max17048_init() {
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+    };
+    conf.master.clk_speed = 400 * 1000;
+    i2c_bus = i2c_bus_create(I2C_NUM_0, &conf);
+    max17048 = max17048_create(i2c_bus, MAX17048_I2C_ADDR_DEFAULT);
+
+    ESP_LOGI(TAG, "[BATT] max17048 fuel guage intialized");
+}
+
+// Single cell fuel guage task to monitor voltage of lithium-ion battery powering the board
+static void batt_monitor_task(void *pvParameters) {
+
+    while (1) {
+        // Get voltage and battery percentage
+        float voltage = 0, percent = 0;
+        max17048_get_cell_voltage(max17048, &voltage);
+        max17048_get_cell_percent(max17048, &percent);
+
+        ESP_LOGI(TAG, "[BATT] Voltage:%.2fV, percent:%.2f%%", voltage, percent);
+        
+        vTaskDelay(pdMS_TO_TICKS(5000)); // 10 second delay
+    }
+}
+
 // CAN RX Task, listens for incoming CAN frames and logs their contents.
 // Telemetry data from Flight Computer
-static void can_rx_task(void *arg) {
+static void can_rx_task(void *pvParameters) {
     twai_message_t msg;
 
     while (1) {
@@ -431,6 +464,7 @@ extern "C" void app_main(void)
     aprs_init();       // AX.25/APRS addresses, path, etc.
     can_bus_init(); // Intialize CAN / TWAI
     led_status_init(); // Initialize LED Array Driver
+    max17048_init(); // Initialize the MAX17048 sensor
 
     // Intialize Radio (RFM69)
     if (!radio_init()) {
@@ -449,6 +483,8 @@ extern "C" void app_main(void)
     xTaskCreate(payload_rx_task, "payload_rx", 4096, NULL, 5, NULL);
     
     xTaskCreate(led_task, "led_task", 2048, NULL, 5, NULL); // Start LED task
+
+    xTaskCreate(batt_monitor_task, "fuel_gauge", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "App main completed, tasks started");
 }

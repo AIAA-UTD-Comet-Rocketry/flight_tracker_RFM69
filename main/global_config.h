@@ -3,32 +3,32 @@
 
 /* BOARD GPIO PINOUT */
 // GPS UART Pins
-#define GPS_TX_PIN      17  // ESP32 RX (Connect to GPS TX)
-#define GPS_RX_PIN      18  // TX not needed (GPS is sending data)
+#define GPS_TX_PIN                 (gpio_num_t)17  // ESP32 RX (Connect to GPS TX)
+#define GPS_RX_PIN                 (gpio_num_t)18  // TX not needed (GPS is sending data)
 
 // RFM69 SPI Pins
-#define RFM69_SCK       7 
-#define RFM69_MISO      9 
-#define RFM69_MOSI      8 
-#define RFM69_CS        6 
-#define RFM69_IRQ       4   // G0 Pin in Breakout board 
-#define RFM69_RST       5 
+#define RFM69_SCK                  (gpio_num_t)7 
+#define RFM69_MISO                 (gpio_num_t)9 
+#define RFM69_MOSI                 (gpio_num_t)8 
+#define RFM69_CS                   (gpio_num_t)6 
+#define RFM69_IRQ                  (gpio_num_t)4   // G0 Pin in Breakout board 
+#define RFM69_RST                  (gpio_num_t)5 
 
 // CAN/TWAI Pins
-#define TWAI_TX_GPIO    38  // ESP32 -> Transceiver TXD
-#define TWAI_RX_GPIO    37  // Transceiver RXD -> ESP32
+#define TWAI_TX_GPIO               (gpio_num_t)42  // ESP32 -> Transceiver TXD
+#define TWAI_RX_GPIO               (gpio_num_t)41  // Transceiver RXD -> ESP32
 
 // LED Status Pins
-#define LED_GPS_PIN     34
-#define LED_RF_PIN      35
-#define LED_CANRX_PIN   33
-#define LED_CANTX_PIN   26
-#define LED_WIFI_PIN    36
-#define LED_STATUS_PIN  21
+#define LED_GPS_PIN                (gpio_num_t)34
+#define LED_RF_PIN                 (gpio_num_t)35
+#define LED_CANRX_PIN              (gpio_num_t)33
+#define LED_CANTX_PIN              (gpio_num_t)26
+#define LED_WIFI_PIN               (gpio_num_t)36
+#define LED_STATUS_PIN             (gpio_num_t)21
 
-// BMS I2C Pins
-#define I2C_SDA         37
-#define I2C_SCL         38
+// Fuel Gauge I2C Pins
+#define I2C_MASTER_SCL_IO          (gpio_num_t)38         /*!< gpio number for I2C master clock */
+#define I2C_MASTER_SDA_IO          (gpio_num_t)37         /*!< gpio number for I2C master data  */
 
 
 #define CALLSIGN            "KK7SSP-11"
@@ -36,7 +36,6 @@
 
 // Transceiver config:
 static const uint8_t sw[] = {0x12, 0xAD};        // sync word — must match receiver
-
 #define RADIO_FREQ          434.0   // MHz (Range from 431.0 - 510.0)
 #define BIT_RATE            4.8     // kbps
 #define DEVIATION_FREQ      5       // kHz

@@ -35,7 +35,7 @@
 #define IREC_TEAM_NUM       308
 
 // Transceiver config:
-static const uint8_t sw[] = {0x12, 0xAD};        // sync word — must match receiver
+static const uint8_t sw[] = {0x10, 0xAF};        // sync word — must match receiver
 #define RADIO_FREQ          434.0   // MHz (Range from 431.0 - 510.0)
 #define BIT_RATE            4.8     // kbps
 #define DEVIATION_FREQ      5       // kHz

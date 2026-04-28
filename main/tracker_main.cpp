@@ -50,6 +50,8 @@ TinyGPSPlus gps;
 // APRS codec instance
 APRSPacket packet;
 
+static volatile float g_batt_voltage = 0.0f;
+
 static bool radio_init() {
     ESP_LOGI(TAG, "[RFM69] Initializing...");
     int st = radio.begin();
@@ -142,8 +144,9 @@ static void max17048_init() {
         .scl_io_num = I2C_MASTER_SCL_IO,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master = { .clk_speed = 400 * 1000 },
+        .clk_flags = 0,
     };
-    conf.master.clk_speed = 400 * 1000;
     i2c_bus = i2c_bus_create(I2C_NUM_0, &conf);
     max17048 = max17048_create(i2c_bus, MAX17048_I2C_ADDR_DEFAULT);
 
@@ -159,9 +162,10 @@ static void batt_monitor_task(void *pvParameters) {
         max17048_get_cell_voltage(max17048, &voltage);
         max17048_get_cell_percent(max17048, &percent);
 
+        g_batt_voltage = voltage;
         ESP_LOGI(TAG, "[BATT] Voltage:%.2fV, percent:%.2f%%", voltage, percent);
         
-        vTaskDelay(pdMS_TO_TICKS(5000)); // 10 second delay
+        vTaskDelay(pdMS_TO_TICKS(5000)); // 5 second delay
     }
 }
 
@@ -254,12 +258,17 @@ void gps_task(void *pvParameters) {
 
             // Build compact APRS text
             char aprs_text[48] = {};
-            snprintf(aprs_text, sizeof(aprs_text),
-                    "=%.5fN/%.5fW Team%d",
+            int aprs_len = snprintf(aprs_text, sizeof(aprs_text),
+                    "=%.5fN/%.5fWTeam%d",
                     fabs(gps.location.lat()), fabs(gps.location.lng()), IREC_TEAM_NUM);
             // snprintf(aprs_text, sizeof(aprs_text),
             //         "=%.5fN/%.5fW Team%d",
             //         -96.752381, 32.993008, IREC_TEAM_NUM);
+            
+            // Add battery voltage reading to APRS text when updated
+            float bv = 0;
+            if (bv > 0.0f && aprs_len > 0 && aprs_len < (int)sizeof(aprs_text))
+                snprintf(aprs_text + aprs_len, sizeof(aprs_text) - aprs_len, "V%.2f", bv);
 
             packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
             std::vector<uint8_t> APRSencoded = packet.encode();
@@ -272,9 +281,14 @@ void gps_task(void *pvParameters) {
             if (APRSencoded.size() < 64) {
                 if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
                     int st = radio.transmit(APRSencoded.data(), APRSencoded.size());
-                    led_signal(LED_EVT_RF_TX);
                     xSemaphoreGive(s_radio_mutex);
-                    ESP_LOGI(TAG, "TX %s (len=%u)", st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)APRSencoded.size());
+                    if (st == RADIOLIB_ERR_NONE) {
+                        // the packet was successfully transmitted
+                        ESP_LOGI(TAG, "TX ok (len=%u)", (unsigned)APRSencoded.size());
+                        led_signal(LED_EVT_RF_TX);
+                    } else {
+                        ESP_LOGI(TAG, "TX fail (len=%u) code=%d", (unsigned)APRSencoded.size(), st);
+                    }
                 }
             } else {
                 ESP_LOGW(TAG, "APRS frame %uB exceeds RFM69 FIFO", (unsigned)APRSencoded.size());
@@ -324,6 +338,7 @@ void radio_test(void *pvParameters) {
         if (state == RADIOLIB_ERR_NONE) {
             // the packet was successfully transmitted
             ESP_LOGI(TAG, "success!");
+            led_signal(LED_EVT_RF_TX);
         } else {
             ESP_LOGI(TAG, "failed, code %d\n", state);
         }

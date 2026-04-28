@@ -31,7 +31,7 @@
 #define I2C_MASTER_SDA_IO          (gpio_num_t)37         /*!< gpio number for I2C master data  */
 
 
-#define CALLSIGN            "KK7SSP-11"
+#define CALLSIGN            "KJ5LPG"
 #define IREC_TEAM_NUM       308
 
 // Transceiver config:

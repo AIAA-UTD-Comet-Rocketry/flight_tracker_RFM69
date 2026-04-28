@@ -28,7 +28,8 @@ void led_signal(uint32_t evt_bit) {
     xEventGroupSetBits(s_led_events, evt_bit);
 }
 
-void led_task(void *arg) {
+// Status LEDs driver task
+void led_task(void *pvParamaters) {
     const uint32_t ALL_BITS = LED_EVT_GPS_TX | LED_EVT_RF_TX |
                               LED_EVT_CAN_RX | LED_EVT_CAN_TX | LED_EVT_WIFI_RX | LED_EVT_ERROR;
 

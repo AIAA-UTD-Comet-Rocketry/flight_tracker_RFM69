@@ -18,7 +18,6 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "math.h"
-#include "driver/twai.h"
 
 #include <RadioLib.h>
 #include "TinyGPS++.h"
@@ -103,12 +102,10 @@ static void aprs_init() {
 static void can_bus_init() {
     ESP_LOGI(TAG, "[CAN] Entering CAN init");
 
-    // Use NO_ACK for single-node bench tests (no second device to ACK).
-    // When there are two nodes, switch to TWAI_MODE_NORMAL.
     twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(
         (gpio_num_t)TWAI_TX_GPIO,
         (gpio_num_t)TWAI_RX_GPIO,
-        TWAI_MODE_NORMAL  // change to TWAI_MODE_NORMAL when second node present
+        TWAI_MODE_NORMAL  // when second node present
     );
 
     // Keep queues small and enable a few useful alerts
@@ -118,8 +115,8 @@ static void can_bus_init() {
                        TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_RECOVERED |
                        TWAI_ALERT_ERR_PASS | TWAI_ALERT_TX_FAILED;
 
-    // 500 kbit/s is a good default; no need to hand-tune timing yet
-    twai_timing_config_t t = TWAI_TIMING_CONFIG_500KBITS();
+    // 250 kbit/s to match flight computer speed
+    twai_timing_config_t t = TWAI_TIMING_CONFIG_250KBITS();
 
     // Accept everything to start; we can filter later
     twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
@@ -128,7 +125,7 @@ static void can_bus_init() {
     ESP_ERROR_CHECK(twai_driver_install(&g, &t, &f));
     ESP_ERROR_CHECK(twai_start());
 
-    ESP_LOGI(TAG, "[CAN] Started @500k on TX=%d RX=%d (mode=%s)",
+    ESP_LOGI(TAG, "[CAN] Started @250k on TX=%d RX=%d (mode=%s)",
              TWAI_TX_GPIO, TWAI_RX_GPIO,
              (g.mode == TWAI_MODE_NO_ACK) ? "NO_ACK" : "NORMAL");
 }
@@ -145,6 +142,15 @@ static void max17048_init() {
     };
     i2c_bus = i2c_bus_create(I2C_NUM_0, &conf);
     max17048 = max17048_create(i2c_bus, MAX17048_I2C_ADDR_DEFAULT);
+    if (0) {
+        if (max17048_reset(max17048) == ESP_OK) {
+            ESP_LOGI(TAG, "[BATT] max17048 reset success");
+        }
+        else {
+            ESP_LOGI(TAG, "[BATT] max17048 fail to reset");
+        }
+    }
+
 
     ESP_LOGI(TAG, "[BATT] max17048 fuel guage intialized");
 }
@@ -175,7 +181,6 @@ void gps_task(void *pvParameters) {
         int len = uart_read_bytes(GPS_UART_NUM, data, BUF_SIZE, 1000 / portTICK_PERIOD_MS);
         
         if (len > 0) {
-            led_signal(LED_EVT_GPS_TX);
             //printf("\n=== GPS Data (Length: %d) ===\n", len);   
             for (int i = 0; i < len; i++) {
                 gps.encode(data[i]); //Feed NMEA data to tinyGPS++
@@ -186,6 +191,7 @@ void gps_task(void *pvParameters) {
 
         if (gps.location.isUpdated()) {
         //if (1) {
+            led_signal(LED_EVT_GPS_TX);
 
             char gps_buffer[64] = {};
             snprintf(gps_buffer, sizeof(gps_buffer),
@@ -235,36 +241,119 @@ void gps_task(void *pvParameters) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay
+        vTaskDelay(pdMS_TO_TICKS(GPS_APRS_PKT_DELAY)); 
     }
 }
 
 // CAN TX task for testing CAN bus transceiver
 // Sends a counter frame every second on ID 0x100
-// static void can_tx_task(void *arg) {
-//     uint32_t counter = 0;
+static void can_tx_task(void *arg) {
+    uint32_t counter = 0;
 
-//     while (1) {
-//         twai_message_t tx_msg = {};
-//         tx_msg.identifier = 0x100;
-//         tx_msg.data_length_code = 4;
-//         tx_msg.data[0] = (counter >> 24) & 0xFF;
-//         tx_msg.data[1] = (counter >> 16) & 0xFF;
-//         tx_msg.data[2] = (counter >>  8) & 0xFF;
-//         tx_msg.data[3] = (counter      ) & 0xFF;
+    while (1) {
+        twai_message_t tx_msg = {};
+        tx_msg.identifier = 0x100;
+        tx_msg.data_length_code = 4;
+        tx_msg.data[0] = (counter >> 24) & 0xFF;
+        tx_msg.data[1] = (counter >> 16) & 0xFF;
+        tx_msg.data[2] = (counter >>  8) & 0xFF;
+        tx_msg.data[3] = (counter      ) & 0xFF;
 
-//         esp_err_t err = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));
-//         if (err == ESP_OK) {
-//             ESP_LOGI("CAN-TX", "Sent ID=0x%03X counter=%lu",
-//                      (unsigned)tx_msg.identifier, (unsigned long)counter);
-//         } else {
-//             ESP_LOGW("CAN-TX", "TX failed: %s", esp_err_to_name(err));
-//         }
+        esp_err_t err = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));
+        if (err == ESP_OK) {
+            ESP_LOGI("CAN-TX", "Sent ID=0x%03X counter=%lu", (unsigned)tx_msg.identifier, (unsigned long)counter);
+            led_signal(LED_EVT_CAN_TX);    
+        } else {
+            ESP_LOGW("CAN-TX", "TX failed: %s", esp_err_to_name(err));
+        }
 
-//         counter++;
-//         vTaskDelay(pdMS_TO_TICKS(1000));
-//     }
-// }
+        counter++;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// CAN RX Task, listens for incoming CAN frames and logs their contents.
+// Telemetry data from Flight Computer
+static void can_rx_task(void *pvParameters) {
+    twai_message_t msg;
+
+    while (1) {
+
+        // Attempt to receive a CAN frame (wait up to 1 second)
+        esp_err_t err = twai_receive(&msg, pdMS_TO_TICKS(1000));
+
+        if (err == ESP_OK) {
+            led_signal(LED_EVT_CAN_RX);
+
+            ESP_LOGI("CAN-RX", "ID=0x%03X DLC=%d",
+                     (unsigned)msg.identifier,
+                     msg.data_length_code);
+
+            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
+                char buf[3 * 8 + 1] = {0};
+                for (int i = 0; i < msg.data_length_code && i < 8; i++) {
+                    sprintf(buf + 3 * i, "%02X ", msg.data[i]);
+                }
+                ESP_LOGI("CAN-RX", "Data: %s", buf);
+            }
+
+            // Parse as CANaerospace and forward over RF
+            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
+                // Build raw packet: [type][CAN ID hi][CAN ID lo][DLC][data...]
+                uint8_t rf_buf[12];
+                uint8_t pos = 0;
+                rf_buf[pos++] = 0x01;  // type = CAN telemetry
+                rf_buf[pos++] = (msg.identifier >> 8) & 0xFF;
+                rf_buf[pos++] = msg.identifier & 0xFF;
+                rf_buf[pos++] = msg.data_length_code;
+                memcpy(&rf_buf[pos], msg.data, msg.data_length_code);
+                pos += msg.data_length_code;
+
+                if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                    int st = radio.transmit(rf_buf, pos);
+                    led_signal(LED_EVT_RF_TX);
+                    xSemaphoreGive(s_radio_mutex);
+                    ESP_LOGI("CAN-RX", "RF TX %s ID=0x%03X len=%d",
+                            st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)msg.identifier, pos);
+                }
+            }
+        }
+        // Any other error (other than timeout) is logged to help diagnose issues.
+        else if (err != ESP_ERR_TIMEOUT) {
+            ESP_LOGW("CAN-RX", "Receive error: %s",
+                     esp_err_to_name(err));
+        }
+    }
+}
+
+// Data is sent from WiFi
+void payload_rx_task(void *pvParameters) {
+    espnow_rx_frame_t f;
+    while (1) {
+        if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
+            led_signal(LED_EVT_WIFI_RX);
+
+            ESP_LOGI("WIFI-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
+                    f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
+            ESP_LOGI("WIFI-RX", "Data: %s", f.data);
+
+            // CANaerospace transmission
+            uint8_t rf_buf[34];
+            uint8_t pos = 0;
+            rf_buf[pos++] = 0x02;  // type = WiFi payload
+            memcpy(&rf_buf[pos], f.data, f.len);
+            pos += f.len;
+
+            if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                int st = radio.transmit(rf_buf, pos);
+                led_signal(LED_EVT_RF_TX);
+                xSemaphoreGive(s_radio_mutex);
+                ESP_LOGI("Wifi-RX", "RF TX %s len=%d",
+                        st == RADIOLIB_ERR_NONE ? "ok" : "fail", pos);
+            }
+        }
+    }
+}
 
 // Radio task for testing transcievers
 void radio_test(void *pvParameters) {
@@ -326,88 +415,6 @@ void radio_rx_test(void *pvParameters) {
     }
 }
 
-// CAN RX Task, listens for incoming CAN frames and logs their contents.
-// Telemetry data from Flight Computer
-static void can_rx_task(void *pvParameters) {
-    twai_message_t msg;
-
-    while (1) {
-
-        // Attempt to receive a CAN frame (wait up to 1 second)
-        esp_err_t err = twai_receive(&msg, pdMS_TO_TICKS(1000));
-
-        if (err == ESP_OK) {
-            led_signal(LED_EVT_CAN_RX);
-
-            ESP_LOGI("CAN-RX", "ID=0x%03X DLC=%d",
-                     (unsigned)msg.identifier,
-                     msg.data_length_code);
-
-            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
-                char buf[3 * 8 + 1] = {0};
-                for (int i = 0; i < msg.data_length_code && i < 8; i++) {
-                    sprintf(buf + 3 * i, "%02X ", msg.data[i]);
-                }
-                ESP_LOGI("CAN-RX", "Data: %s", buf);
-            }
-
-            // Parse as CANaerospace and forward over RF
-            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
-                // Build raw packet: [type][CAN ID hi][CAN ID lo][DLC][data...]
-                uint8_t rf_buf[12];
-                uint8_t pos = 0;
-                rf_buf[pos++] = 0x01;  // type = CAN telemetry
-                rf_buf[pos++] = (msg.identifier >> 8) & 0xFF;
-                rf_buf[pos++] = msg.identifier & 0xFF;
-                rf_buf[pos++] = msg.data_length_code;
-                memcpy(&rf_buf[pos], msg.data, msg.data_length_code);
-                pos += msg.data_length_code;
-
-                if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-                    int st = radio.transmit(rf_buf, pos);
-                    led_signal(LED_EVT_RF_TX);
-                    xSemaphoreGive(s_radio_mutex);
-                    ESP_LOGI("CAN-RX", "RF TX %s ID=0x%03X len=%d",
-                            st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)msg.identifier, pos);
-                }
-            }
-        }
-        // Any other error (other than timeout) is logged to help diagnose issues.
-        else if (err != ESP_ERR_TIMEOUT) {
-            ESP_LOGW("CAN-RX", "Receive error: %s",
-                     esp_err_to_name(err));
-        }
-    }
-}
-
-void payload_rx_task(void *pvParameters) {
-    espnow_rx_frame_t f;
-    while (1) {
-        if (xQueueReceive(espnow_q, &f, pdMS_TO_TICKS(1000))) {
-            led_signal(LED_EVT_WIFI_RX);
-
-            ESP_LOGI("WIFI-RX", "from %02X:%02X:%02X:%02X:%02X:%02X len=%d",
-                    f.from[0],f.from[1],f.from[2],f.from[3],f.from[4],f.from[5], f.len);
-            ESP_LOGI("WIFI-RX", "Data: %s", f.data);
-
-            // CANaerospace transmission
-            uint8_t rf_buf[34];
-            uint8_t pos = 0;
-            rf_buf[pos++] = 0x02;  // type = WiFi payload
-            memcpy(&rf_buf[pos], f.data, f.len);
-            pos += f.len;
-
-            if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-                int st = radio.transmit(rf_buf, pos);
-                led_signal(LED_EVT_RF_TX);
-                xSemaphoreGive(s_radio_mutex);
-                ESP_LOGI("Wifi-RX", "RF TX %s len=%d",
-                        st == RADIOLIB_ERR_NONE ? "ok" : "fail", pos);
-            }
-        }
-    }
-}
-
 static void chipIdEcho() {
     printf("\n=== Starting Chip Identification ===\n");
     fflush(stdout);
@@ -465,7 +472,7 @@ extern "C" void app_main(void)
     aprs_init();       // AX.25/APRS addresses, path, etc.
     can_bus_init(); // Intialize CAN / TWAI
     led_status_init(); // Initialize LED Array Driver
-    max17048_init(); // Initialize the MAX17048 sensor
+    //max17048_init(); // Initialize the MAX17048 sensor
 
     // Intialize Radio (RFM69)
     if (!radio_init()) {
@@ -485,7 +492,7 @@ extern "C" void app_main(void)
     
     xTaskCreate(led_task, "led_task", 2048, NULL, 5, NULL); // Start LED task
 
-    xTaskCreate(batt_monitor_task, "fuel_gauge", 4096, NULL, 5, NULL);
+    //xTaskCreate(batt_monitor_task, "fuel_gauge", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "App main completed, tasks started");
 }

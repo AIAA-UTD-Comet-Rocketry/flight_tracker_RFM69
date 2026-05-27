@@ -37,7 +37,7 @@
 // Transceiver config:
 static const uint8_t sw[] = {0x10, 0xAF};        // sync word — must match receiver
 #define RADIO_FREQ          434.0   // MHz (Range from 431.0 - 510.0)
-#define BIT_RATE            2.4     // kbps - controls how fast data can be sent
+#define BIT_RATE            4.8     // kbps - controls how fast data can be sent
 #define DEVIATION_FREQ      5       // kHz - modulation index needs to be 2: 5/1.2 ~ 2
 #define RX_BANDWITH         125      // kHz - narrow range = less noise but higher sensitivity (BW = 2 × deviation + bit_rate)
 #define OUTPUT_PWR          20      // dBM - 20 is max power

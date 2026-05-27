@@ -72,3 +72,19 @@ bool canas_parse(const twai_message_t *frame, canas_msg_t *out);
  * or a negative value if buf_len is too small.
  */
 int canas_format_aprs(const canas_msg_t *msg, char *buf, size_t buf_len);
+
+typedef struct __attribute__((packed)) {
+    uint32_t time_ms;
+    int16_t  altitude_ft;
+    int16_t  vert_vel_fps_x10;
+    int16_t  accel_x_mg;
+    int16_t  accel_y_mg;
+    int16_t  accel_z_mg;
+    int16_t  pitch_deg;
+    int16_t  roll_deg;
+    int16_t  yaw_deg;
+    uint8_t  fsm_state;
+    uint8_t  status_flags;
+    uint8_t  pyro_status;
+    uint8_t  reserved;
+} can_tlm_packet_t;

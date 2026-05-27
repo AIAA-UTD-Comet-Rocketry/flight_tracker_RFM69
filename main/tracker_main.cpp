@@ -35,6 +35,8 @@ static SemaphoreHandle_t s_radio_mutex = NULL;
 static i2c_bus_handle_t i2c_bus = NULL;
 static max17048_handle_t max17048 = NULL;
 static volatile float g_batt_voltage = 0.0f;
+static uint8_t  s_tlm_buf[24]  = {0};
+static uint32_t s_tlm_received = 0;  // bitmask, bit N = chunk N received
 
 // Create a new instance of the HAL class
 EspHal* hal = new EspHal(RFM69_SCK, RFM69_MISO, RFM69_MOSI);
@@ -274,54 +276,85 @@ static void can_tx_task(void *arg) {
 
 // CAN RX Task, listens for incoming CAN frames and logs their contents.
 // Telemetry data from Flight Computer
+// Added Reassembly buffer for the 6-chunk telemetry packet
 static void can_rx_task(void *pvParameters) {
     twai_message_t msg;
 
     while (1) {
-
-        // Attempt to receive a CAN frame (wait up to 1 second)
         esp_err_t err = twai_receive(&msg, pdMS_TO_TICKS(1000));
 
-        if (err == ESP_OK) {
-            led_signal(LED_EVT_CAN_RX);
+        if (err != ESP_OK) {
+            if (err != ESP_ERR_TIMEOUT) {
+                ESP_LOGW("CAN-RX", "Receive error: %s", esp_err_to_name(err));
+            }
+            continue;
+        }
 
-            ESP_LOGI("CAN-RX", "ID=0x%03X DLC=%d",
-                     (unsigned)msg.identifier,
-                     msg.data_length_code);
+        led_signal(LED_EVT_CAN_RX);
 
-            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
-                char buf[3 * 8 + 1] = {0};
-                for (int i = 0; i < msg.data_length_code && i < 8; i++) {
-                    sprintf(buf + 3 * i, "%02X ", msg.data[i]);
-                }
-                ESP_LOGI("CAN-RX", "Data: %s", buf);
+        if (msg.flags & TWAI_MSG_FLAG_RTR) continue;
+
+        uint32_t id = msg.identifier;
+
+        // Check if this is a telemetry chunk (IDs 1400-1405)
+        if (id >= TLM_BASE_ID && id < TLM_BASE_ID + TLM_CHUNKS) {
+            uint8_t chunk = id - TLM_BASE_ID;
+            uint8_t offset = chunk * 4;
+
+            // Copy the 4 data bytes (skip the 4-byte CANaerospace header)
+            // CANaerospace layout: [node_id][dtc][svc_code][msg_code][data0..3]
+            // data bytes start at index 4
+            if (msg.data_length_code >= 8) {
+                memcpy(&s_tlm_buf[offset], &msg.data[4], 4);
+                s_tlm_received |= (1 << chunk);
             }
 
-            // Parse as CANaerospace and forward over RF
-            if (!(msg.flags & TWAI_MSG_FLAG_RTR)) {
-                // Build raw packet: [type][CAN ID hi][CAN ID lo][DLC][data...]
-                uint8_t rf_buf[12];
-                uint8_t pos = 0;
-                rf_buf[pos++] = 0x01;  // type = CAN telemetry
-                rf_buf[pos++] = (msg.identifier >> 8) & 0xFF;
-                rf_buf[pos++] = msg.identifier & 0xFF;
-                rf_buf[pos++] = msg.data_length_code;
-                memcpy(&rf_buf[pos], msg.data, msg.data_length_code);
-                pos += msg.data_length_code;
+            // Check if all 6 chunks received
+            if (s_tlm_received == TLM_ALL_CHUNKS) {
+                s_tlm_received = 0;  // reset for next packet
+
+                // Build RF packet: [0x01 type][24 bytes telemetry]
+                uint8_t rf_buf[25];
+                rf_buf[0] = 0x01;  // type = FC telemetry
+                memcpy(&rf_buf[1], s_tlm_buf, 24);
 
                 if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-                    int st = radio.transmit(rf_buf, pos);
+                    int st = radio.transmit(rf_buf, sizeof(rf_buf));
                     led_signal(LED_EVT_RF_TX);
                     xSemaphoreGive(s_radio_mutex);
-                    ESP_LOGI("CAN-RX", "RF TX %s ID=0x%03X len=%d",
-                            st == RADIOLIB_ERR_NONE ? "ok" : "fail", (unsigned)msg.identifier, pos);
+
+                    // Log decoded fields for debugging
+                    can_tlm_packet_t *pkt = (can_tlm_packet_t *)s_tlm_buf;
+                    ESP_LOGI("CAN-RX", "RF TX %s | Alt=%d ft Vel=%.1f fps Acc=%.2fg FSM=%d",
+                             st == RADIOLIB_ERR_NONE ? "ok" : "fail",
+                             pkt->altitude_ft,
+                             pkt->vert_vel_fps_x10 / 10.0f,
+                             pkt->accel_z_mg / 1000.0f,
+                             pkt->fsm_state);
                 }
             }
         }
-        // Any other error (other than timeout) is logged to help diagnose issues.
-        else if (err != ESP_ERR_TIMEOUT) {
-            ESP_LOGW("CAN-RX", "Receive error: %s",
-                     esp_err_to_name(err));
+        // Handle event frames (ID 1310) — still send individually
+        else if (id == 1310 && msg.data_length_code >= 6) {
+            uint8_t rf_buf[4];
+            rf_buf[0] = 0x03;          // type = FC event
+            rf_buf[1] = msg.data[0];   // node_id
+            rf_buf[2] = msg.data[4];   // event_type
+            rf_buf[3] = msg.data[5];   // event_data
+
+            if (xSemaphoreTake(s_radio_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                int st = radio.transmit(rf_buf, sizeof(rf_buf));
+                led_signal(LED_EVT_RF_TX);
+                xSemaphoreGive(s_radio_mutex);
+                ESP_LOGI("CAN-RX", "Event RF TX %s type=0x%02X data=0x%02X",
+                         st == RADIOLIB_ERR_NONE ? "ok" : "fail",
+                         rf_buf[2], rf_buf[3]);
+            }
+        }
+        // Log any other CAN frames for debugging
+        else {
+            ESP_LOGD("CAN-RX", "ID=0x%03X DLC=%d (unhandled)",
+                     (unsigned)id, msg.data_length_code);
         }
     }
 }
@@ -472,7 +505,7 @@ extern "C" void app_main(void)
     aprs_init();       // AX.25/APRS addresses, path, etc.
     can_bus_init(); // Intialize CAN / TWAI
     led_status_init(); // Initialize LED Array Driver
-    //max17048_init(); // Initialize the MAX17048 sensor
+    max17048_init(); // Initialize the MAX17048 sensor
 
     // Intialize Radio (RFM69)
     if (!radio_init()) {
@@ -492,7 +525,7 @@ extern "C" void app_main(void)
     
     xTaskCreate(led_task, "led_task", 2048, NULL, 5, NULL); // Start LED task
 
-    //xTaskCreate(batt_monitor_task, "fuel_gauge", 4096, NULL, 5, NULL);
+    xTaskCreate(batt_monitor_task, "fuel_gauge", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "App main completed, tasks started");
 }

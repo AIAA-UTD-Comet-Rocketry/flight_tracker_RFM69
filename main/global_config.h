@@ -37,16 +37,17 @@
 // Transceiver config:
 static const uint8_t sw[] = {0x10, 0xAF};        // sync word — must match receiver
 #define RADIO_FREQ          434.0   // MHz (Range from 431.0 - 510.0)
-#define BIT_RATE            4.8     // kbps
-#define DEVIATION_FREQ      5       // kHz
-#define RX_BANDWITH         125.0   // kHz
-#define OUTPUT_PWR          20      // dBM
-#define PREAMBLE_LENGTH     32      // bits
+#define BIT_RATE            2.4     // kbps - controls how fast data can be sent
+#define DEVIATION_FREQ      5       // kHz - modulation index needs to be 2: 5/1.2 ~ 2
+#define RX_BANDWITH         125      // kHz - narrow range = less noise but higher sensitivity (BW = 2 × deviation + bit_rate)
+#define OUTPUT_PWR          20      // dBM - 20 is max power
+#define PREAMBLE_LENGTH     32      // bits - affects how fast receiver locks
 
 // GPS config:
 #define GPS_UART_NUM        UART_NUM_1  // Changed from UART_NUM_0 to avoid conflict with console
 #define GPS_BAUD_RATE       9600    // NEO-6M default
 #define BUF_SIZE            1024
+#define GPS_APRS_PKT_DELAY  3000       // 3 seconds
 
 // Wifi config:
 static const uint8_t ESPNOW_SENDER_MAC[6] = {
@@ -57,5 +58,10 @@ static const uint8_t ESPNOW_SENDER_MAC[6] = {
 #define ESPNOW_IFACE          WIFI_IF_STA   // WIFI_IF_STA or WIFI_IF_AP
 #define ESPNOW_RX_QUEUE_LEN   16            // Queue sizing for received frames
 #define ESPNOW_RX_MAX_LEN     32            // 32 bytes typical payload
+
+// CAN Config
+#define TLM_ALL_CHUNKS  0x3F         // bits 0-5 set = all 6 chunks received
+#define TLM_BASE_ID     1400
+#define TLM_CHUNKS      6
 
 #endif // global_config.h

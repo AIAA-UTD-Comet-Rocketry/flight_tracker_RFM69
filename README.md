@@ -8,7 +8,7 @@ ESP32-S3 based GPS tracker and radio communication module for Comet Rocketry. In
 ## How It Works
 
 ### Overview
-The firmware runs five concurrent FreeRTOS tasks. All RF transmissions share a single mutex (`s_radio_mutex`) that serializes access to the RFM69 SPI bus — whichever task is ready to transmit acquires the mutex, sends its packet, then releases it.
+The firmware runs five concurrent FreeRTOS tasks. All RF transmissions share a single mutex (`s_radio_mutex`) that serializes access to the RFM69 SPI bus.
 
 ### RTOS Tasks
 

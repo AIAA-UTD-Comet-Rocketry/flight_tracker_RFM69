@@ -392,7 +392,7 @@ void payload_rx_task(void *pvParameters) {
 void radio_test(void *pvParameters) {
 
     while(1) {
-        uint8_t testBuff[8] = {0x07, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
+        uint8_t testBuff[8] = {0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02};
         ESP_LOGI(TAG, "[RFM69] Transmitting packet ... ");
         //int state = radio.transmit("Hello World!!!");
         //transmit(const uint8_t* data, size_t len, uint8_t addr)

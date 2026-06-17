@@ -51,7 +51,7 @@ static const uint8_t sw[] = {0x10, 0xAF};        // sync word — must match rec
 
 // Wifi config:
 static const uint8_t ESPNOW_SENDER_MAC[6] = {
-     0xB0, 0x81, 0x84, 0x9B, 0xAB, 0x70 
+     0xe8, 0xf6, 0x0a, 0x8d, 0xba, 0x54 
     }; // Payload ESP32
 
 #define ESPNOW_CHANNEL        6             // must match sender’s channel

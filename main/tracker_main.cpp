@@ -211,12 +211,6 @@ void gps_task(void *pvParameters) {
             // snprintf(aprs_text, sizeof(aprs_text),
             //         "=%.5fN/%.5fW Team%d",
             //         -96.752381, 32.993008, IREC_TEAM_NUM);
-            
-            // Add battery voltage reading to APRS text when updated
-            // float bv = 0;
-            //bv = g_batt_voltage;
-            // if (bv > 0.0f && aprs_len > 0 && aprs_len < (int)sizeof(aprs_text))
-            //     snprintf(aprs_text + aprs_len, sizeof(aprs_text) - aprs_len, "V%.2f", bv);
 
             packet.payload = std::string(aprs_text);   // <-- assign string (FIX)
             std::vector<uint8_t> APRSencoded = packet.encode();
